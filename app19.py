@@ -15,8 +15,15 @@ from docx2pdf import convert
 import pypandoc  
 from PyPDF2 import PdfMerger  
 import os  
-import tempfile 
+import tempfile
+import nltk  
+from nltk.tokenize import word_tokenize  
+from nltk.corpus import stopwords  
+from nltk.stem import WordNetLemmatizer  
+import string
 
+# Run the NLTK setup script  
+import nltk_setup
 # Load environment variables from .env file  
 load_dotenv()  
 # Initialize global variables  
@@ -34,6 +41,26 @@ client = AzureOpenAI(
 # Azure Form Recognizer setup  
 form_recognizer_endpoint = os.getenv("FORM_RECOGNIZER_ENDPOINT")  
 form_recognizer_api_key = os.getenv("FORM_RECOGNIZER_API_KEY")  
+
+# Preprocessing function  
+def process_text(text):  
+    """Process the extracted text by tokenizing, removing stop words, punctuation, extra whitespace, and lemmatizing."""  
+    stop_words = set(stopwords.words('english'))  
+    lemmatizer = WordNetLemmatizer()  
+      
+    words = word_tokenize(text)  
+      
+    processed_words = []  
+    for word in words:  
+        word_lower = word.lower()  # Convert to lowercase  
+        if word_lower not in stop_words and word_lower not in string.punctuation:  
+            lemmatized_word = lemmatizer.lemmatize(word_lower)  
+            processed_words.append(lemmatized_word)  
+      
+    processed_text = ' '.join(processed_words)  
+    processed_text = ' '.join(processed_text.split())  
+      
+    return processed_text  
   
   
 def extract_text_from_docx(uploaded_docx):  
@@ -926,6 +953,7 @@ def merge_pdfs(pdf_list, output_file):
     merger.close()  
     return output_file  
   
+  
 # Ensure session state is initialized  
 if 'conflict_results' not in st.session_state:  
     st.session_state.conflict_results = None  
@@ -977,13 +1005,16 @@ with st.expander("Step 1: Office Action", expanded=True):
             if os.path.exists(temp_file_path):  
                 extracted_examiner_text = extract_text_from_pdf(temp_file_path)  
                 if extracted_examiner_text:  
-                    domain, expertise, style = determine_domain_expertise(extracted_examiner_text)  
+                    # Process the extracted text  
+                    processed_examiner_text = process_text(extracted_examiner_text)  
+                      
+                    domain, expertise, style = determine_domain_expertise(processed_examiner_text)  
                     if domain and expertise and style:  
                         st.session_state.domain = domain  
                         st.session_state.expertise = expertise  
                         st.session_state.style = style  
   
-                        conflict_results_raw = check_for_conflicts(extracted_examiner_text, domain, expertise, style)  
+                        conflict_results_raw = check_for_conflicts(processed_examiner_text, domain, expertise, style)  
                         if conflict_results_raw:  
                             st.session_state.conflict_results = conflict_results_raw  
                             st.session_state.foundational_claim = conflict_results_raw.get("foundational_claim", "")  
@@ -1024,7 +1055,9 @@ if st.session_state.get("conflict_results") is not None:
                     with open(f"temp_{uploaded_ref_file.name}", "wb") as f:  
                         f.write(uploaded_ref_file.read())  
                     extracted_ref_text = extract_text_from_pdf(f"temp_{uploaded_ref_file.name}")  
-                    ref_texts.append(extracted_ref_text)  
+                    # Process the extracted text  
+                    processed_ref_text = process_text(extracted_ref_text)  
+                    ref_texts.append(processed_ref_text)  
                     os.remove(f"temp_{uploaded_ref_file.name}")  
   
                 figure_analysis_results = extract_figures_and_text(  
@@ -1090,8 +1123,11 @@ if st.session_state.get("figure_analysis") is not None:
                             os.remove("temp_filed.pdf")  
   
                             if extracted_filed_app_text:  
+                                # Process the extracted text  
+                                processed_filed_app_text = process_text(extracted_filed_app_text)  
+                                  
                                 filed_app_details = extract_details_from_filed_application(  
-                                    extracted_filed_app_text,  
+                                    processed_filed_app_text,  
                                     st.session_state.foundational_claim,  
                                     st.session_state.domain,  
                                     st.session_state.expertise,  
@@ -1145,9 +1181,12 @@ if st.session_state.get("figure_analysis") is not None:
                     os.remove("temp_filed.pdf")  
   
                     if extracted_filed_app_text:  
+                        # Process the extracted text  
+                        processed_filed_app_text = process_text(extracted_filed_app_text)  
+                          
                         st.session_state.filed_application_name = uploaded_filed_app.name  
                         filed_app_details = extract_details_from_filed_application(  
-                            extracted_filed_app_text,  
+                            processed_filed_app_text,  
                             st.session_state.foundational_claim,  
                             st.session_state.domain,  
                             st.session_state.expertise,  
@@ -1186,6 +1225,7 @@ if st.session_state.get("figure_analysis") is not None:
                         st.error("Failed to extract text from the filed application document.")  
                 else:  
                     st.warning("Please upload the filed application first.")  
+  
 # Step 4: Pending Claims  
 if st.session_state.get("filed_application_analysis") is not None:  
     with st.expander("Step 4: Pending Claims", expanded=True):  
@@ -1208,9 +1248,12 @@ if st.session_state.get("filed_application_analysis") is not None:
                     os.remove("temp_pending_claims.pdf")  
   
                     if extracted_pending_claims_text:  
+                        # Process the extracted text  
+                        processed_pending_claims_text = process_text(extracted_pending_claims_text)  
+                          
                         modified_filed_application_results = extract_and_modify_filed_application(  
                             st.session_state.filed_application_analysis,  
-                            extracted_pending_claims_text,  
+                            processed_pending_claims_text,  
                             st.session_state.domain,  
                             st.session_state.expertise,  
                             st.session_state.style  
@@ -1220,7 +1263,7 @@ if st.session_state.get("filed_application_analysis") is not None:
                             st.success("Modified filed application analysis completed successfully!")  
   
                             pending_claims_analysis_results = analyze_modified_application(  
-                                extracted_pending_claims_text,  
+                                processed_pending_claims_text,  
                                 st.session_state.foundational_claim,  
                                 st.session_state.figure_analysis,  
                                 modified_filed_application_results,  
