@@ -1295,64 +1295,73 @@ if st.session_state.get("filed_application_analysis") is not None:
         st.session_state.pending_claims_available = st.radio(  
             "Select an option:",  
             ("Yes", "No"),  
-            index=0 if st.session_state.pending_claims_available == "Yes" else 1  
+            index=0 if st.session_state.pending_claims_available == "Yes" else 1,  
+            key="pending_claims_radio"  
         )  
   
         if st.session_state.pending_claims_available == "Yes":  
             st.write("### Upload the Pending Claims Document and Analyze")  
-            uploaded_pending_claims_file, analyze_pending_claims_clicked = st.file_uploader("Upload Pending Claims Document", type=["pdf"]), st.button("Analyze Pending Claims")  
+            uploaded_pending_claims_file = st.file_uploader("Upload Pending Claims Document", type=["pdf", "docx"])  
+            analyze_pending_claims_clicked = st.button("Analyze Pending Claims")  
   
             if analyze_pending_claims_clicked:  
                 if uploaded_pending_claims_file is not None:  
-                    with open("temp_pending_claims.pdf", "wb") as f:  
-                        f.write(uploaded_pending_claims_file.read())  
-                    extracted_pending_claims_text = extract_text_from_pdf("temp_pending_claims.pdf")  
-                    os.remove("temp_pending_claims.pdf")  
+                    with tempfile.TemporaryDirectory() as tmpdirname:  
+                        file_path = os.path.join(tmpdirname, uploaded_pending_claims_file.name)  
+                        with open(file_path, "wb") as f:  
+                            f.write(uploaded_pending_claims_file.read())  
   
-                    if extracted_pending_claims_text:  
-                        # Process the extracted text  
-                        processed_pending_claims_text = process_text(extracted_pending_claims_text)  
-                          
-                        modified_filed_application_results = extract_and_modify_filed_application(  
-                            st.session_state.filed_application_analysis,  
-                            processed_pending_claims_text,  
-                            st.session_state.domain,  
-                            st.session_state.expertise,  
-                            st.session_state.style  
-                        )  
-                        if modified_filed_application_results:  
-                            st.session_state.modified_filed_application_results = modified_filed_application_results  
-                            st.success("Modified filed application analysis completed successfully!")  
+                        if uploaded_pending_claims_file.type == "application/pdf":  
+                            extracted_pending_claims_text = extract_text_from_pdf(file_path)  
+                        elif uploaded_pending_claims_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":  
+                            extracted_pending_claims_text = extract_text_from_docx(file_path)  
   
-                            pending_claims_analysis_results = analyze_modified_application(  
+                        if extracted_pending_claims_text:  
+                            # Process the extracted text  
+                            processed_pending_claims_text = process_text(extracted_pending_claims_text)  
+  
+                            modified_filed_application_results = extract_and_modify_filed_application(  
+                                st.session_state.filed_application_analysis,  
                                 processed_pending_claims_text,  
-                                st.session_state.foundational_claim,  
-                                st.session_state.figure_analysis,  
-                                modified_filed_application_results,  
                                 st.session_state.domain,  
                                 st.session_state.expertise,  
                                 st.session_state.style  
                             )  
-                            if pending_claims_analysis_results:  
-                                st.session_state.pending_claims_analysis = pending_claims_analysis_results  
-                                st.success("Pending claims analysis completed successfully!")  
   
-                                docx_buffer = save_analysis_to_word(pending_claims_analysis_results)  
-                                if docx_buffer:  
-                                    filed_application_name = st.session_state.filed_application_name.replace(" ", "_")  
-                                    st.download_button(  
-                                        label="Download Analysis Results",  
-                                        data=docx_buffer,  
-                                        file_name=f"{filed_application_name}_ANALYSIS.docx",  
-                                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",  
-                                        key="pending_claims_download"  
-                                    )  
+                            if modified_filed_application_results:  
+                                st.session_state.modified_filed_application_results = modified_filed_application_results  
+                                st.success("Modified filed application analysis completed successfully!")  
+  
+                                pending_claims_analysis_results = analyze_modified_application(  
+                                    processed_pending_claims_text,  
+                                    st.session_state.foundational_claim,  
+                                    st.session_state.figure_analysis,  
+                                    modified_filed_application_results,  
+                                    st.session_state.domain,  
+                                    st.session_state.expertise,  
+                                    st.session_state.style  
+                                )  
+  
+                                if pending_claims_analysis_results:  
+                                    st.session_state.pending_claims_analysis = pending_claims_analysis_results  
+                                    st.success("Pending claims analysis completed successfully!")  
+  
+                                    docx_buffer = save_analysis_to_word(pending_claims_analysis_results)  
+                                    if docx_buffer:  
+                                        filed_application_name = st.session_state.filed_application_name.replace(" ", "_")  
+                                        st.download_button(  
+                                            label="Download Analysis Results",  
+                                            data=docx_buffer,  
+                                            file_name=f"{filed_application_name}_ANALYSIS.docx",  
+                                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",  
+                                            key="pending_claims_download"  
+                                        )  
+                                else:  
+                                    st.error("Failed to analyze the pending claims.")  
                             else:  
-                                st.error("Failed to analyze the pending claims.")  
+                                st.error("Failed to modify the filed application based on pending claims.")  
                         else:  
-                            st.error("Failed to modify the filed application based on pending claims.")  
-                    else:  
-                        st.error("Failed to extract text from the pending claims document.")  
+                            st.error("Failed to extract text from the pending claims document.")  
                 else:  
                     st.warning("Please upload the pending claims document first.")  
   
