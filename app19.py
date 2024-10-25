@@ -649,7 +649,8 @@ def analyze_filed_application(extracted_details, foundational_claim, figure_anal
       
     Assess whether the examiner's rejection of the application under U.S.C 102 (Lack of Novelty) or U.S.C 103 (Obviousness) is justified by comparing it with the cited references text.  
       
-    IMPORTANT FORMATTING RULES:  
+    IMPORTANT FORMATTING RULES:
+    Do not give one line explanations anywhere and make very lengthy
     Numbering and Formatting: Use bullet points (•) instead of numbers when listing items.  
     Do not include markdown formatting in your response.  
     Bolden only the headings.  
@@ -657,7 +658,6 @@ def analyze_filed_application(extracted_details, foundational_claim, figure_anal
     Give amendments for all key features in foundational claim is mandatory.  
     Do NOT put N/A anywhere and enclose words within asterisks(**)  
     Make the answers detailed and do not give extra line spacing.
-    Do not give one line explanations anywhere and make very lengthy.
     Add the conclusion after proposing amendments.
     The few shot example is just for understanding the structure.
       
