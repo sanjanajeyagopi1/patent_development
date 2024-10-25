@@ -1134,7 +1134,7 @@ if st.session_state.get("conflict_results") is not None:
                     os.remove(f"temp_{uploaded_ref_file.name}")  
   
                 figure_analysis_results = extract_figures_and_text(  
-                    st.session_state.conflict_results, ref_texts,  
+                    st.session_state.conflict_results, extracted_ref_text,  
                     st.session_state.domain, st.session_state.expertise, st.session_state.style  
                 )  
   
@@ -1200,7 +1200,7 @@ if st.session_state.get("figure_analysis") is not None:
                                 processed_filed_app_text = process_text(extracted_filed_app_text)  
                                   
                                 filed_app_details = extract_details_from_filed_application(  
-                                    processed_filed_app_text,  
+                                    extracted_filed_app_text,  
                                     st.session_state.foundational_claim,  
                                     st.session_state.domain,  
                                     st.session_state.expertise,  
