@@ -553,8 +553,7 @@ def extract_and_modify_filed_application(filed_application_details, pending_clai
         print(f"Error extracting and modifying filed application details: {e}")  
         return None  
   
-# Function to analyze the filed application based on the foundational claim, figure analysis, and application details  
-# Function to analyze the filed application based on the foundational claim, figure analysis, and application details  
+# Function to analyze the filed application based on the foundational claim, figure analysis, and application details   
 def analyze_filed_application(extracted_details, foundational_claim, figure_analysis, domain, expertise, style):  
     content = f"""  
     You are now assuming the role of a deeply specialized expert in {domain} as well as a comprehensive understanding of patent law specific to the mentioned domain. Your expertise includes:  
@@ -647,7 +646,9 @@ def analyze_filed_application(extracted_details, foundational_claim, figure_anal
     Bolden only the headings.  
     Make your explanations lengthy and cite the sources correctly.  
     Give amendments for all key features in foundational claim.  
-    Do NOT put N/A anywhere and enclose words within asterisks(**)  
+    Do NOT put N/A anywhere and enclose words within asterisks(**)
+    Make all responses detailed
+    All headings must be bold
       
     Key Features of Foundational Claim:  
     Extract and list the key features of the foundational claim. Ensure to include structural details, functional aspects, and any specific configurations mentioned in the claim.  
