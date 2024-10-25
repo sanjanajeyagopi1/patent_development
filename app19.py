@@ -553,7 +553,7 @@ def extract_and_modify_filed_application(filed_application_details, pending_clai
         print(f"Error extracting and modifying filed application details: {e}")  
         return None  
   
-# Function to analyze the filed application based on the foundational claim, figure analysis, and application details   
+# Function to analyze the filed application based on the foundational claim, figure analysis, and application details  
 def analyze_filed_application(extracted_details, foundational_claim, figure_analysis, domain, expertise, style):  
     content = f"""  
     You are now assuming the role of a deeply specialized expert in {domain} as well as a comprehensive understanding of patent law specific to the mentioned domain. Your expertise includes:  
@@ -600,6 +600,15 @@ def analyze_filed_application(extracted_details, foundational_claim, figure_anal
     - **Non-Obviousness**: Combining a communication system with an adaptive frequency hopping protocol introduces an unexpected technical advantage by improving communication reliability and reducing interference, which is not suggested or rendered obvious by the prior art.  
     - **Technical Advantages**: Enhances communication reliability and reduces interference, as detailed in Paragraph [0046] of the application.  
     - **Addressing Examiner's Rejection**: The prior art only teaches static frequency selection methods, thus the amendment overcomes the rejection by introducing adaptive frequency hopping functionality not suggested in the cited reference.  
+    **Propose New Arguments or Amendments:**
+    -**Amendment 1: Enhanced Communication Protocol**  
+      
+    **Original Claim Language:**  
+    "A communication system comprising a transmitter and receiver."  
+      
+    **Proposed Amended Language:**  
+    "A communication system comprising a transmitter and receiver, wherein the transmitter is configured to utilize an adaptive frequency hopping protocol to dynamically adjust communication channels based on interference levels."  
+      
     """  
       
     # Including another few-shot example  
@@ -645,10 +654,12 @@ def analyze_filed_application(extracted_details, foundational_claim, figure_anal
     Do not include markdown formatting in your response.  
     Bolden only the headings.  
     Make your explanations lengthy and cite the sources correctly.  
-    Give amendments for all key features in foundational claim.  
-    Do NOT put N/A anywhere and enclose words within asterisks(**)
-    Make all responses detailed
-    All headings must be bold
+    Give amendments for all key features in foundational claim is mandatory.  
+    Do NOT put N/A anywhere and enclose words within asterisks(**)  
+    Make the answers detailed and do not give extra line spacing.
+    Do not give one line explanations anywhere and make very lengthy.
+    Add the conclusion after proposing amendments.
+    The few shot example is just for understanding the structure.
       
     Key Features of Foundational Claim:  
     Extract and list the key features of the foundational claim. Ensure to include structural details, functional aspects, and any specific configurations mentioned in the claim.  
@@ -743,7 +754,6 @@ def analyze_filed_application(extracted_details, foundational_claim, figure_anal
     except Exception as e:  
         print(f"Error during filed application analysis: {e}")  
         return None  
-  
  
   
 def analyze_modified_application(cited_references_text, foundational_claim, figure_analysis, modified_application_details, domain, expertise, style): 
