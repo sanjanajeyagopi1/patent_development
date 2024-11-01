@@ -14,23 +14,40 @@ from azure.core.exceptions import HttpResponseError
 from docx2pdf import convert  
 import pypandoc  
 from PyPDF2 import PdfMerger  
-import os  
 import tempfile
 import nltk  
 from nltk.tokenize import word_tokenize  
 from nltk.corpus import stopwords  
 from nltk.stem import WordNetLemmatizer  
 import string
+import logging
+from pydantic import BaseModel, ValidationError 
+import time  
+import random  
+from docx.enum.text import WD_ALIGN_PARAGRAPH  
 
-# Run the NLTK setup script  
-import nltk_setup
+# Configure logging  
+logging.basicConfig(  
+    level=logging.INFO,  # Change to DEBUG for more detailed logs  
+    format='%(asctime)s - %(levelname)s - %(message)s',  
+    handlers=[logging.FileHandler("app.log"), logging.StreamHandler()]  
+)  
+
+
+# Make sure to download the necessary NLTK data  
+nltk.download('punkt')  
+nltk.download('stopwords')  
+nltk.download('wordnet')  
+nltk.download('omw-1.4') 
+nltk.download('punkt_tab')
 # Load environment variables from .env file  
 load_dotenv()  
 # Initialize global variables  
 domain_subject_matter = "default domain"  
 experience_expertise_qualifications = "default qualifications"  
 style_tone_voice = "default style"
-  
+
+ 
 # Set up Azure OpenAI API credentials from .env  
 client = AzureOpenAI(  
     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),  # Pull from environment  
@@ -40,10 +57,31 @@ client = AzureOpenAI(
   
 # Azure Form Recognizer setup  
 form_recognizer_endpoint = os.getenv("FORM_RECOGNIZER_ENDPOINT")  
-form_recognizer_api_key = os.getenv("FORM_RECOGNIZER_API_KEY")  
+form_recognizer_api_key = os.getenv("FORM_RECOGNIZER_API_KEY") 
+# Define a model for conflict results  
+class ConflictResults(BaseModel):  
+    foundational_claim: str  
+    documents_referenced: list[str]  
+    figures: list[str]  
+    text: str  
+
+class DomainExpertise(BaseModel):  
+    domain_subject_matter: str  
+    experience_expertise_qualifications: str  
+    style_tone_voice: str   
+
+class FigureAnalysisResults(BaseModel):  
+    figures_analysis: list[dict]  
+    extracted_paragraphs: list[str]  
+
+# Define the Pydantic model for extracted details  
+class FoundationalClaimDetails(BaseModel):  
+    foundational_claim_details: list[dict]  
 
 # Preprocessing function  
-def process_text(text):  
+def process_text(text):
+ logging.info("Started processing text.")   
+ try:
     """Process the extracted text by tokenizing, removing stop words, punctuation, extra whitespace, and lemmatizing."""  
     stop_words = set(stopwords.words('english'))  
     lemmatizer = WordNetLemmatizer()  
@@ -59,26 +97,30 @@ def process_text(text):
       
     processed_text = ' '.join(processed_words)  
     processed_text = ' '.join(processed_text.split())  
-      
+    logging.info("Completed processing text.")    
     return processed_text  
+ except Exception as e:  
+        logging.error(f"Error processing text: {e}")  
+        raise    
   
-  
-def extract_text_from_docx(uploaded_docx):  
+def extract_text_from_docx(uploaded_docx): 
+ logging.info(f"Extracting text from DOCX: {uploaded_docx.name}") 
+ try: 
     """Extract text from a DOCX file."""  
     doc = docx.Document(uploaded_docx)  
     full_text = []  
     for para in doc.paragraphs:  
         full_text.append(para.text)  
     return "\n".join(full_text)  
+ except Exception as e:  
+        logging.error(f"Error extracting text from DOCX: {e}")  
+        raise  
   
 def determine_domain_expertise(action_document_text):  
     """Analyze the action document to determine the required domain expertise, experience, and analysis style."""  
     global domain_subject_matter, experience_expertise_qualifications, style_tone_voice  
   
-    prompt = f"""  
-    Analyze the following action document text and determine the domain expertise required to analyze this document:  
-    {action_document_text}  
-      
+    prompt = f"""Analyze the following action document text and determine the domain expertise required to analyze this document: {action_document_text}  
     Step 1: Identify the subject matter and domain expertise required to understand this document and the cited documents in depth.  
     Step 2: Determine the experience, expertise, and educational qualifications required to handle this document and the cited documents in depth.  
     Step 3: Describe the style, tone, and voice required to analyze these kinds of documents.  
@@ -92,14 +134,8 @@ def determine_domain_expertise(action_document_text):
     """  
   
     messages = [  
-        {  
-            "role": "system",  
-            "content": "You are an AI assistant that can analyze the following action document text and determine the domain, expertise, and subject matter required to analyze this document."  
-        },  
-        {  
-            "role": "user",  
-            "content": prompt  
-        }  
+        {"role": "system", "content": "You are an AI assistant that can analyze the following action document text and determine the domain, expertise, and subject matter required to analyze this document."},  
+        {"role": "user", "content": prompt}  
     ]  
   
     try:  
@@ -112,149 +148,169 @@ def determine_domain_expertise(action_document_text):
         raw_content = response.choices[0].message.content.strip()  
   
         # Print the raw response for debugging  
-        st.write("Raw API Response:")  
-        st.write(raw_content)  
+        print("Raw API Response:")  
+        print(raw_content)  
   
-        # Remove any non-JSON content using regular expressions  
+        # Use regex to find JSON content  
         json_match = re.search(r'{.*}', raw_content, re.DOTALL)  
         if not json_match:  
-            st.error("No JSON content found in the response.")  
+            print("No JSON content found in the response.")  
             return (None, None, None)  
   
         cleaned_content = json_match.group(0)  
   
+        # Check for code block markers and remove them  
+        if cleaned_content.startswith("```json"):  
+            cleaned_content = cleaned_content[7:-3].strip()  
+        elif cleaned_content.startswith("```"):  
+            cleaned_content = cleaned_content[3:-3].strip()  
+  
         # Print the cleaned content for debugging  
-        st.write("Cleaned API Response:")  
-        st.write(cleaned_content)  
+        print("Cleaned API Response:")  
+        print(cleaned_content)  
   
-        # Correct missing commas between JSON sections  
-        cleaned_content = re.sub(r'"\s+"', '", "', cleaned_content)  
-  
-        # Remove invalid control characters  
-        cleaned_content = ''.join(c for c in cleaned_content if c.isprintable())  
-  
-        # Attempt to parse the cleaned JSON content  
+        # Validate and parse using Pydantic  
         try:  
-            data = json.loads(cleaned_content)  
-        except json.JSONDecodeError as json_err:  
-            # If JSON parsing fails, print the error and the cleaned content for debugging  
-            st.error(f"JSON decoding error: {json_err}")  
-            st.error(f"Cleaned response content: {cleaned_content}")  
+            # Parse cleaned content as JSON to ensure it's valid  
+            json_data = json.loads(cleaned_content)  
+  
+            # Validate with Pydantic model  
+            expertise_data = DomainExpertise(**json_data)  
+            domain_subject_matter = expertise_data.domain_subject_matter  
+            experience_expertise_qualifications = expertise_data.experience_expertise_qualifications  
+            style_tone_voice = expertise_data.style_tone_voice  
+            return (domain_subject_matter, experience_expertise_qualifications, style_tone_voice)  
+        except (ValidationError, json.JSONDecodeError) as e:  
+            print(f"Validation or JSON error: {str(e)}")  
             return (None, None, None)  
   
-        domain_subject_matter = data.get("domain_subject_matter")  
-        experience_expertise_qualifications = data.get("experience_expertise_qualifications")  
-        style_tone_voice = data.get("style_tone_voice")  
-  
-        # Return the results as a tuple  
-        return (domain_subject_matter, experience_expertise_qualifications, style_tone_voice)  
-  
     except Exception as e:  
-        st.error(f"Error during domain expertise determination: {e}")  
+        print(f"Error during domain expertise determination: {str(e)}")  
         return (None, None, None)  
   
-def check_for_conflicts(action_document_text, domain, expertise, style):
-    """
-    Analyzes the action document and extracts:
-    - Foundational claim
-    - Referenced documents
-    - Figures and technical text related to them
-    """
-    global domain_subject_matter, experience_expertise_qualifications, style_tone_voice
+    except Exception as e:  
+        st.error(f"Error during domain expertise determination: {str(e)}")  
+        return (None, None, None) 
     
-    # Escape curly braces in the action_document_text
-    escaped_text = action_document_text.replace("{", "{{").replace("}", "}}")
-
-    # The content with placeholders dynamically filled
-    content = f"""
-    You are now assuming the role of a deeply specialized expert in {domain} as well as a comprehensive understanding of patent law specific to the mentioned domain. Your expertise includes:
-
-    1. {domain}
-    2. Patent Law Proficiency: 
-    a. Skilled in interpreting and evaluating patent claims, classifications, and legal terminologies.
-    b. Knowledgeable about the structure and requirements of patent applications.
-    c. Expertise in comparing similar documents for patent claims under sections U.S.C 102 (novelty) and U.S.C 103 (non-obviousness).
-
-    3. {expertise}
-    4. Capability to Propose Amendments:
-    a. Experienced in responding to examiners’ assertions or rejections of claims.
-    b. Skilled in proposing suitable amendments to patent claims to address rejections under U.S.C 102 (novelty) and U.S.C 103 (non-obviousness).
-    c. Proficient in articulating and justifying amendments to ensure compliance with patentability requirements.
-
-    Adopt a {style} suitable for analyzing patent applications in the given domain and subject matter. Your analysis should include:
-
-    a. A thorough evaluation of the technical details and functionalities described in the patent application.
-    b. An assessment of the clarity and precision of the technical descriptions and diagrams.
-    c. An analysis of the novelty (under U.S.C 102) and non-obviousness (under U.S.C 103) of the subject matter by comparing it with similar existing documents.
-    d. Feedback on the strengths and potential areas for improvement in the document.
-    e. A determination of whether the invention meets the criteria for patentability under sections U.S.C 102 and U.S.C 103.
-    f. Proposals for suitable amendments to the claims in response to potential examiners’ assertions or rejections, ensuring the claims are robust and meet patentability standards.
-
-    Using this expertise, experience, and educational background, analyze the provided patent application document with a focus on its technical accuracy, clarity, adherence to patent application standards, novelty, non-obviousness, and overall feasibility.
-    """
-    # Print the content to the terminal
-    print("Generated Content for LLM:\n")
-    print(content)
-
-    # Formulate the prompt to be sent to the LLM
-    prompt = f"""
-    Analyze the following action document text and extract the foundational claim:
-    {escaped_text}
-    Step 1: Extract the key claims from the document and name it as 'Key_claims'.
-    Step 2: From the 'Key_claims' extract the foundational claim and store it in a variable called "foundational_claim" (Note: method claims and system claims are not considered independent claims and only one claim can be the foundational claim).
-    Step 3: From the foundational claim, extract the information under U.S.C 102 and/or 103.
-    Step 4: Extract all referenced documents under U.S.C. 102 and/or 103 mentioned in the action document specified only in the "foundational_claim".
-    Step 5: For each referenced document, create a variable that stores the document name.
-    Step 6: If the foundational claim refers to the referenced documents, extract the entire technical content with its specified paragraph location and image reference. Map the claim with the conflicting document name.
-    Step 7: Do not extract any referenced document data that is not related to the foundational claim.   
-    NOTE: Extract in English.
-    Step 8: Return the output as a JSON object with the following structure:
-    {{
-        "foundational_claim": "text",
-        "documents_referenced": ["doc1", "doc2", ...],
-        "figures": ["fig1", "fig2", ...],
-        "text": "detailed text"
-    }}
-    """
-
-    messages = [
-        {
-            "role": "system",
-            "content": content  # dynamically generated content for the LLM's role
-        },
-        {
-            "role": "user",
-            "content": prompt,  # prompt asking the user for conflict analysis
-        },
-    ]
-
-    # Call the OpenAI API for conflict checking (assuming you have client setup)
-    try:
-        response = client.chat.completions.create(
-            model="GPT-4-Omni", messages=messages, temperature=0.2
-        )
-        # Extract the content and remove the triple backticks if necessary
-        content = response.choices[0].message.content.strip()
-
-        if content.startswith("```json"):
-            content = content[7:-3].strip()
-        elif content.startswith("```"):
-            content = content[3:-3].strip()
-
-        # Print the raw response for debugging
-        print(f"Raw response: {response.choices[0].message.content}")
-
-        # Parse the JSON content
-        return json.loads(content)
-
-    except json.JSONDecodeError as e:
-        print(f"JSON decoding error: {e}")
-        print(f"Raw response: {response.choices[0].message.content}")
-        return None
-    except Exception as e:
-        print(f"Error during conflict checking: {e}")
-        return None
-
+def check_for_conflicts(action_document_text, domain, expertise, style):  
+    """Analyzes the action document and extracts:  
+    - Foundational claim  
+    - Referenced documents  
+    - Figures and technical text related to them  
+    """  
+    # Escape curly braces in the action_document_text  
+    escaped_text = action_document_text.replace("{", "{{").replace("}", "}}")  
+  
+    # The content with placeholders dynamically filled  
+    content = f"""  
+    You are now assuming the role of a deeply specialized expert in {domain} as well as a comprehensive understanding of patent law specific to the mentioned domain. Your expertise includes:  
+    1. {domain}  
+    2. Patent Law Proficiency:  
+        a. Skilled in interpreting and evaluating patent claims, classifications, and legal terminologies.  
+        b. Knowledgeable about the structure and requirements of patent applications.  
+        c. Expertise in comparing similar documents for patent claims under sections U.S.C 102 (novelty) and U.S.C 103 (non-obviousness).  
+    3. {expertise}  
+    4. Capability to Propose Amendments:  
+        a. Experienced in responding to examiners’ assertions or rejections of claims.  
+        b. Skilled in proposing suitable amendments to patent claims to address rejections under U.S.C 102 (novelty) and U.S.C 103 (non-obviousness).  
+        c. Proficient in articulating and justifying amendments to ensure compliance with patentability requirements.  
+    Adopt a {style} suitable for analyzing patent applications in the given domain and subject matter. Your analysis should include:  
+    a. A thorough evaluation of the technical details and functionalities described in the patent application.  
+    b. An assessment of the clarity and precision of the technical descriptions and diagrams.  
+    c. An analysis of the novelty (under U.S.C 102) and non-obviousness (under U.S.C 103) of the subject matter by comparing it with similar existing documents.  
+    d. Feedback on the strengths and potential areas for improvement in the document.  
+    e. A determination of whether the invention meets the criteria for patentability under sections U.S.C 102 and U.S.C 103.  
+    f. Proposals for suitable amendments to the claims in response to potential examiners’ assertions or rejections, ensuring the claims are robust and meet patentability standards.  
+    Using this expertise, experience, and educational background, analyze the provided patent application document with a focus on its technical accuracy, clarity, adherence to patent application standards, novelty, non-obviousness, and overall feasibility.  
+    """  
+  
+    # Formulate the prompt to be sent to the LLM  
+    prompt = f"""  
+    Analyze the following action document text and extract the foundational claim:  
+    {escaped_text}  
+    Step 1: Extract the key claims from the document and name it as 'Key_claims'.  
+    Step 2: From the 'Key_claims' extract the foundational claim with its number and store it in a variable called "foundational_claim" (Note: method claims and system claims are not considered independent claims and only one claim can be the foundational claim).  
+    Step 3: From the foundational claim, extract the information under U.S.C 102 and/or 103.  
+    Step 4: Extract all referenced documents under U.S.C. 102 and/or 103 mentioned in the action document specified only in the "foundational_claim".  
+    Step 5: For each referenced document, create a variable that stores the document name.  
+    Step 6: If the foundational claim refers to the referenced documents, extract the entire technical content with its specified paragraph location and image reference. Map the claim with the conflicting document name.  
+    Step 7: Do not extract any referenced document data that is not related to the foundational claim.  
+    NOTE: Extract in English.  
+    NOTE: Give the documents referenced with their publication numbers EG. Deker US...  
+    Step 8: Return the output as a JSON object with the following structure:  
+    {{  
+        "foundational_claim": "text",  
+        "documents_referenced": ["doc1", "doc2", ...],  
+        "figures": ["fig1", "fig2", ...],  
+        "text": "detailed text"  
+    }}  
+    """  
+  
+    messages = [  
+        {  
+            "role": "system",  
+            "content": content  # dynamically generated content for the LLM's role  
+        },  
+        {  
+            "role": "user",  
+            "content": prompt  # prompt asking the user for conflict analysis  
+        },  
+    ]  
+  
+    def call_api_with_retries():  
+        max_retries = 3  
+        retry_delay = 2  # seconds  
+        for attempt in range(max_retries):  
+            try:  
+                response = client.chat.completions.create(  
+                    model="GPT-4-Omni", messages=messages, temperature=0.2  
+                )  
+                return response  
+            except Exception as e:  
+                logging.error(f"API call failed on attempt {attempt + 1}: {str(e)}")  
+                if attempt < max_retries - 1:  
+                    time.sleep(retry_delay)  
+                else:  
+                    raise  
+  
+    try:  
+        response = call_api_with_retries()  
+  
+        # Extract the response content  
+        content = response.choices[0].message.content.strip()  
+  
+        # Locate the JSON within triple backticks  
+        start_index = content.find("```json")  
+        if start_index != -1:  
+            end_index = content.find("```", start_index + 7)  
+            if end_index != -1:  
+                json_string = content[start_index + 7:end_index].strip()  
+            else:  
+                json_string = content[start_index + 7:].strip()  
+  
+        # Validate and parse using Pydantic  
+        if json_string:  
+            try:  
+                # Parse the JSON to ensure it's valid  
+                json_data = json.loads(json_string)  
+                # Validate with Pydantic model  
+                conflict_results = ConflictResults(**json_data)  
+                return conflict_results.dict()  
+            except json.JSONDecodeError as e:  
+                logging.error(f"JSON decoding error: {str(e)}")  
+                logging.error(f"Content causing error: {json_string}")  
+                return None  
+            except ValidationError as e:  
+                logging.error(f"Validation error: {str(e)}")  
+                logging.error(f"Content causing error: {json_string}")  
+                return None  
+        else:  
+            logging.error("No JSON content extracted.")  
+            return None  
+    except Exception as e:  
+        logging.error(f"Error during conflict checking: {str(e)}")  
+        return None  
+  
 
 # Function to extract and analyze figure-related details  
 def extract_figures_and_text(conflict_results, ref_documents_texts, domain, expertise, style):  
@@ -317,22 +373,22 @@ def extract_figures_and_text(conflict_results, ref_documents_texts, domain, expe
     Figures: {json.dumps(fig_details, indent=2)}  
     Text: {text_details}  
     Referenced Document Texts: {json.dumps(ref_documents_texts, indent=2)}  
-    Example Output Format:  
-    {{  
-        "figures_analysis": [  
-            {{  
-                "figure_number": "Figure 1",  
-                "title": "Title of Figure 1",  
-                "technical_details": "Detailed text",  
-                "importance": "Explanation of importance"  
-            }},  
-            ...  
-        ],  
-        "extracted_paragraphs": [  
-            "Paragraph text 1",  
-            ...  
-        ]  
-    }}  
+    Response format:
+    {{
+        "figures_analysis": [
+            {{
+                "figure_number": "Figure 1",
+                "title": "Title of Figure 1",
+                "technical_details": "Detailed technical description",
+                "importance": "Explanation of importance"
+            }},
+            ...
+        ],
+        "extracted_paragraphs": [
+            "Paragraph text 1",
+            ...
+        ]
+    }}
     """  
   
     messages = [  
@@ -351,27 +407,40 @@ def extract_figures_and_text(conflict_results, ref_documents_texts, domain, expe
         response = client.chat.completions.create(  
             model="GPT-4-Omni", messages=messages, temperature=0.2  
         )  
-        analysis_output = response.choices[0].message.content.strip()  
+        # Check if the response has content and parse it  
+        analysis_output = response.choices[0].message.content.strip() if response.choices[0].message.content else ""  
   
-        # Remove the triple backticks if they exist  
+        # Debug print statements  
+        print("Raw API response:\n", response.choices[0].message.content)  
+  
+        # Handle JSON output with flexible parsing for backticks  
         if analysis_output.startswith("```json"):  
             analysis_output = analysis_output[7:-3].strip()  
         elif analysis_output.startswith("```"):  
             analysis_output = analysis_output[3:-3].strip()  
   
-        # Print the raw response for debugging  
-        print(f"Raw response: {response.choices[0].message.content}")  
-  
-        # Parse the JSON content  
-        return json.loads(analysis_output)  
-  
-    except json.JSONDecodeError as e:  
-        print(f"JSON decoding error: {e}")  
-        print(f"Raw response: {response.choices[0].message.content}")  
-        return None  
+        # Validate and parse JSON output  
+        if analysis_output:  
+            try:  
+                # Parse the JSON to ensure it's valid  
+                json_data = json.loads(analysis_output)  
+                # Validate with Pydantic model  
+                figure_analysis_results = FigureAnalysisResults(**json_data)  
+                return figure_analysis_results.dict()  
+            except json.JSONDecodeError as e:  
+                print(f"JSON decoding error during validation: {e}")  
+                print(f"Analysis output content causing error: {analysis_output}")  
+                return None  
+            except ValidationError as e:  
+                print(f"Validation error: {e.json()}")  
+                print(f"Analysis output content causing error: {analysis_output}")  
+                return None  
+        else:  
+            print("No content received from OpenAI API.")  
+            return None  
     except Exception as e:  
-        print(f"Error during figure analysis: {e}")  
-        return None  
+        print(f"Unexpected error: {e}")  
+        return None 
 
 
 def extract_details_from_filed_application(filed_application_text, foundational_claim, domain, expertise, style):  
@@ -412,15 +481,16 @@ def extract_details_from_filed_application(filed_application_text, foundational_
     1. Identify and extract all technical details from the filed application that relate to the foundational claim.  
     2. Ensure that any extracted details include specific references to the paragraphs or sections in the filed application where they are found. NOTE: Extract in English.  
     3. Return the extracted details in the following JSON format:  
-    {{  
-        "foundational_claim_details": [  
-            {{  
-                "paragraph_number": "Paragraph 1",  
-                "text": "Detailed text related to the foundational claim"  
-            }},  
-            ...  
-        ]  
-    }}  
+    JSON format:
+    {{
+        "foundational_claim_details": [
+            {{
+                "paragraph_number": "Paragraph 1",
+                "text": "Technical text relating to the foundational claim"
+            }},
+            ...
+        ]
+    }}
     """  
   
     messages = [  
@@ -439,27 +509,47 @@ def extract_details_from_filed_application(filed_application_text, foundational_
         response = client.chat.completions.create(  
             model="GPT-4-Omni", messages=messages, temperature=0.2  
         )  
-        analysis_output = response.choices[0].message.content.strip()  
+          
+        # Extract the response content  
+        content = response.choices[0].message.content.strip()  
   
-        # Remove the triple backticks if they exist  
-        if analysis_output.startswith("```json"):  
-            analysis_output = analysis_output[7:-3].strip()  
-        elif analysis_output.startswith("```"):  
-            analysis_output = analysis_output[3:-3].strip()  
+        # Locate the JSON within triple backticks  
+        start_index = content.find("```json")  
+        if start_index != -1:  
+            end_index = content.find("```", start_index + 7)  
+            if end_index != -1:  
+                json_string = content[start_index + 7:end_index].strip()  
+            else:  
+                json_string = content[start_index + 7:].strip()  
+        else:  
+            # If no JSON block is found, treat the entire content as potential JSON  
+            json_string = content  
   
-        # Print the raw response for debugging  
-        print(f"Raw response: {response.choices[0].message.content}")  
+        # Print raw response for debugging  
+        print(f"Raw response: {content}")  
   
-        # Parse the JSON content  
-        return json.loads(analysis_output)  
-  
-    except json.JSONDecodeError as e:  
-        print(f"JSON decoding error: {e}")  
-        print(f"Raw response: {response.choices[0].message.content}")  
-        return None  
+        # Validate JSON structure  
+        if json_string:  
+            try:  
+                # Parse the JSON to ensure it's valid  
+                parsed_json = json.loads(json_string)  
+                # Validate with Pydantic model  
+                details = FoundationalClaimDetails(**parsed_json)  
+                return details.dict()  
+            except json.JSONDecodeError as e:  
+                print(f"JSON decoding error: {e}")  
+                print(f"Raw response: {json_string}")  
+                return None  
+            except ValidationError as e:  
+                print(f"Validation error: {e.json()}")  
+                print(f"Raw response: {json_string}")  
+                return None  
+        else:  
+            print("No JSON content extracted.")  
+            return None  
     except Exception as e:  
         print(f"Error extracting details from filed application: {e}")  
-        return None  
+        return None 
 
   
 # Function to extract details from pending claims and modify the filed application details  
@@ -531,28 +621,49 @@ def extract_and_modify_filed_application(filed_application_details, pending_clai
         response = client.chat.completions.create(  
             model="GPT-4-Omni", messages=messages, temperature=0.2  
         )  
-        analysis_output = response.choices[0].message.content.strip()  
           
-        # Remove the triple backticks if they exist  
-        if analysis_output.startswith("```json"):  
-            analysis_output = analysis_output[7:-3].strip()  
-        elif analysis_output.startswith("```"):  
-            analysis_output = analysis_output[3:-3].strip()  
-          
-        # Print the raw response for debugging  
-        print(f"Raw response: {response.choices[0].message.content}")  
-          
-        # Parse the JSON content  
-        return json.loads(analysis_output)  
-      
-    except json.JSONDecodeError as e:  
-        print(f"JSON decoding error: {e}")  
-        print(f"Raw response: {response.choices[0].message.content}")  
-        return None  
-    except Exception as e:  
-        print(f"Error extracting and modifying filed application details: {e}")  
-        return None  
+        # Extract the response content  
+        content = response.choices[0].message.content.strip()  
   
+        # Locate the JSON within triple backticks  
+        start_index = content.find("```json")  
+        if start_index != -1:  
+            end_index = content.find("```", start_index + 7)  
+            if end_index != -1:  
+                json_string = content[start_index + 7:end_index].strip()  
+            else:  
+                json_string = content[start_index + 7:].strip()  
+        else:  
+            # If no JSON block is found, treat the entire content as potential JSON  
+            json_string = content  
+  
+        # Print raw response for debugging  
+        print(f"Raw response: {content}")  
+  
+        # Validate JSON structure  
+        if json_string:  
+            try:  
+                # Parse the JSON to ensure it's valid  
+                parsed_json = json.loads(json_string)  
+                # Validate with Pydantic model  
+                details = FoundationalClaimDetails(**parsed_json)  
+                return details.dict()  
+            except json.JSONDecodeError as e:  
+                print(f"JSON decoding error: {e}")  
+                print(f"Raw response: {json_string}")  
+                return None  
+            except ValidationError as e:  
+                print(f"Validation error: {e.json()}")  
+                print(f"Raw response: {json_string}")  
+                return None  
+        else:  
+            print("No JSON content extracted.")  
+            return None  
+    except Exception as e:  
+        print(f"Error extracting details from filed application: {e}")  
+        return None 
+  
+ 
 # Function to analyze the filed application based on the foundational claim, figure analysis, and application details  
 def analyze_filed_application(extracted_details, foundational_claim, figure_analysis, domain, expertise, style):  
     content = f"""  
@@ -601,43 +712,44 @@ def analyze_filed_application(extracted_details, foundational_claim, figure_anal
     - **Technical Advantages**: Enhances communication reliability and reduces interference, as detailed in Paragraph [0046] of the application.  
     - **Addressing Examiner's Rejection**: The prior art only teaches static frequency selection methods, thus the amendment overcomes the rejection by introducing adaptive frequency hopping functionality not suggested in the cited reference.  
     **Propose New Arguments or Amendments:**
-    -**Amendment 1: Enhanced Communication Protocol**  
+    -**Amendment 1:** Enhanced Communication Protocol**  
       
     **Original Claim Language:**  
     "A communication system comprising a transmitter and receiver."  
       
     **Proposed Amended Language:**  
-    "A communication system comprising a transmitter and receiver, wherein the transmitter is configured to utilize an adaptive frequency hopping protocol to dynamically adjust communication channels based on interference levels."  
-      
+    "A communication system comprising a transmitter and receiver, <u> wherein the transmitter is configured to utilize an adaptive frequency hopping protocol to dynamically adjust communication channels based on interference levels </u>." 
+    
+    
     """  
       
     # Including another few-shot example  
     text_a = """  
     **Example Analysis**  
       
-    **Key Features of Foundational Claim:**  
-    • Multiparameter Leadset: Configured to interface with a monitoring device for monitoring multiple health indicators of a patient.  
-    • Single Patient Plug: Having a plurality of monitoring contacts.  
+    **Key Features of Independent Claim 1**  
+    • **Multiparameter Leadset:** Configured to interface with a monitoring device for monitoring multiple health indicators of a patient.  
+    • **Single Patient Plug:** Having a plurality of monitoring contacts.  
       
-    **Key Features of Cited Reference:**  
-    • Multiparameter Leadset (Naylor): Depicted in Figure 2, comprising a temperature sensor, non-invasive pulse oximetry sensor, and EKG sensor.  
-    • Junction Box: Connects to a patient monitor via a common output cable, with receptacles for each sensor plug (Figure 2: junction box 226).  
+    **Key Features of Cited Reference(Naylor):**  
+    • **Multiparameter Leadset (Naylor)**: Depicted in Figure 2, comprising a temperature sensor, non-invasive pulse oximetry sensor, and EKG sensor.  
+    • **Junction Box**: Connects to a patient monitor via a common output cable, with receptacles for each sensor plug (Figure 2: junction box 226).  
       
     **Examiner’s Analysis:**  
     The examiner rejected the application based on U.S.C 103 (Obviousness), asserting that the claimed features are either disclosed or obvious in light of the Naylor reference combined with Morley for the interconnection feature. The examiner interprets the cited reference as teaching or suggesting all elements of the foundational claim, including the use of a multiparameter leadset with a single patient plug and various patient leads for different health indicators. The interconnection feature is deemed obvious for better wire management.  
       
     **Novelty Analysis (U.S.C 102 - Lack of Novelty):**  
     Comparing the foundational claim with the Naylor reference:  
-    • Multiparameter Leadset: Both the foundational claim and Naylor describe a multiparameter leadset.  
-    • Single Patient Plug: Naylor's junction box 226 serves a similar function.  
+    • **Multiparameter Leadset**: Both the foundational claim and Naylor describe a multiparameter leadset.  
+    • **Single Patient Plug**: Naylor's junction box 226 serves a similar function.  
       
     **Non-Obviousness Analysis (U.S.C 103 - Obviousness):**  
     The foundational claim may be considered obvious in light of Naylor combined with Morley:  
     • The interconnection feature, while not explicitly taught by Naylor, is deemed an obvious modification for better wire management as suggested by Morley.  
       
     **Conclusion:**  
-    The examiner’s rejection under U.S.C 103 (Obviousness) is justified as the combination of features in the foundational claim appears to be an obvious modification of the Naylor reference, with the interconnection feature suggested by Morley.  
-    """  
+    The examiner’s rejection under U.S.C 103 (Obviousness) or U.S.C 102 ( Lack of Novelty)[Depending on which examiner claims] may be justified as the combination of features in the foundational claim appears to be an obvious modification of the Naylor reference, with the interconnection feature suggested by Morley.  
+    """ 
       
     prompt = f"""  
     Analyze the filed application based on the foundational claim:  
@@ -649,19 +761,22 @@ def analyze_filed_application(extracted_details, foundational_claim, figure_anal
       
     Assess whether the examiner's rejection of the application under U.S.C 102 (Lack of Novelty) or U.S.C 103 (Obviousness) is justified by comparing it with the cited references text.  
       
-    IMPORTANT FORMATTING RULES:
-    Do not give one line explanations anywhere and make very lengthy
+    IMPORTANT FORMATTING RULES:  
     Numbering and Formatting: Use bullet points (•) instead of numbers when listing items.  
-    Do not include markdown formatting in your response.  
-    Bolden only the headings.  
-    Make your explanations lengthy and cite the sources correctly.  
-    Give amendments for all key features in foundational claim is mandatory.  
-    Do NOT put N/A anywhere and enclose words within asterisks(**)  
-    Make the answers detailed and do not give extra line spacing.
-    Add the conclusion after proposing amendments.
-    The few shot example is just for understanding the structure.
-      
-    Key Features of Foundational Claim:  
+    Do not include markdown formatting in your response, except for bolding headings and sub-headings, and underlining as specified.  
+    Bold all headings and sub-headings for clarity.
+    Underline new language in the 'Proposed Amended Language' by enclosing it within '<u>' and '</u>' tags.
+    Provide detailed explanations and cite the sources correctly.  
+    Propose amendments for all key features in foundational claim. 
+    Do NOT include "N/A" anywhere and enclose words within asterisks(**)  
+    Avoid one-line explanations; provid thorough and detailed analysis
+    Maintain concise formatting without extra line spacing
+    Add a conclusion after proposing amendments.
+    The provided examples are for structural guidance only; do not replicate them verbatim.
+    Avoid using words like "only" that may downplay the content
+
+           
+    Key Features of Independent Claim with Number:  
     Extract and list the key features of the foundational claim. Ensure to include structural details, functional aspects, and any specific configurations mentioned in the claim.  
       
     Key Features of Cited Reference:  
@@ -677,21 +792,21 @@ def analyze_filed_application(extracted_details, foundational_claim, figure_anal
     Analyze whether the foundational claim is obvious in light of the cited reference. Consider if the combination of features in the foundational claim would have been obvious to a person skilled in the art at the time of the invention. Discuss any differences that might contribute to non-obviousness.  
       
     Conclusion:  
-    Provide a conclusion on whether the examiner’s rejection under U.S.C 102 (Lack of Novelty) or U.S.C 103 (Obviousness) is justified. Summarize the key points that support or refute the examiner’s rejection.  
+    Provide a conclusion on whether the examiner’s rejection under U.S.C 102 (Lack of Novelty) or U.S.C 103 (Obviousness) may be justified or not. Summarize the key points that support or refute the examiner’s rejection.  
       
     Potential Areas for Distinction:  
     Identify areas where the foundational claim can be distinguished from the cited reference. Focus on unique structural features, specific materials, configurations, or functions not disclosed in the cited reference.  
       
     Proposed Amendments and Arguments:  
     For each key feature point in the foundational claim, propose specific amendments separately. NOTE: for all the points in the foundational claim, it is mandatory to propose amendments.  
-    Present original and proposed versions, highlighting new features, specific materials, or configurations.  
+    Present original and proposed versions, highlighting new features, specific materials, or configurations. **Underline** the new language proposed by enclosing it within '<u>' and '</u>' tags. 
       
     Format for Each Amendment:  
     Amendment [Number]: [Feature Title]  
     Original Claim Language:  
     "[Insert the exact original feature description from the foundational claim.]"  
     Proposed Amended Language:  
-    "[Insert the enhanced feature description, incorporating new details, specific materials, or configurations.]"  
+    "[Insert the enhanced feature description, incorporating new details, specific materials, or configurations.  **Underline** the new language proposed by enclosing it within '<u>' and '</u>' tags.]"  
     Derivation of Amendment:  
     Source Reference: Cite specific sections, paragraphs, figures, or embodiments from the application that support the amendment. Example: "Derived from Paragraph [0123] and Figure 5 of the application."  
     Reasoning: Explain why the amendment was made, detailing how it enhances specificity, overcomes prior art, or adds technical advantages. Highlight any differences from the cited references. Emphasize any technical advantages or improvements introduced by the amendments.  
@@ -715,6 +830,26 @@ def analyze_filed_application(extracted_details, foundational_claim, figure_anal
       
     Propose New Arguments or Amendments:  
     Suggest additional arguments or amendments to further distinguish the foundational claim from the cited prior art. Include multiple amendments for thorough differentiation. Ensure that the original intent of the claims is maintained while improving clarity and scope.  
+    Original Claim Language:  
+    "[Insert the exact original feature description from the foundational claim.]"  
+    Proposed Amended Language:  
+    "[Insert the enhanced feature description, incorporating new details, specific materials, or configurations.**Underline** the new language proposed by enclosing it within '<u>' and '</u>' tags.]"  
+    Derivation of Amendment:  
+    Source Reference: Cite specific sections, paragraphs, figures, or embodiments from the application that support the amendment. Example: "Derived from Paragraph [0123] and Figure 5 of the application."  
+    Reasoning: Explain why the amendment was made, detailing how it enhances specificity, overcomes prior art, or adds technical advantages. Highlight any differences from the cited references. Emphasize any technical advantages or improvements introduced by the amendments.  
+
+    NOTE:
+    Ensure all headings and sub-headings are bolded as demonstrated in the examples.
+    Maintain the specified formatting to align with the analysis guidelines.
+    Provide detailed explanations in each section, referencing specific parts of the application and cited references.
+    Avoid using markdown formatting beyond bolding headings, as per the instructions.
+    In each **Proposed Amended Language**, the new language introduced to enhance the claim is **underlined** by enclosing it within '<u>' and '</u>' tags to clearly highlight the additions.
+    
+    Additional Guidance:
+    Structure: Follow the sequential order of sections as outlined in the analysis guidelines.
+    Detailing: Expand on explanations, providing in-depth reasoning and evidence.
+    Clarity: Use clear and precise language to articulate points effectively.
+    Consistency: Keep the formatting consistent throughout the analysis.
     """  
       
     messages = [  
@@ -736,25 +871,37 @@ def analyze_filed_application(extracted_details, foundational_claim, figure_anal
         },  
     ]  
       
-    try:  
-        response = client.chat.completions.create(  
-            model="GPT-4-Omni", messages=messages, temperature=0.2  
-        )  
-        analysis_output = response.choices[0].message.content.strip()  
-          
-        if analysis_output.startswith("```json"):  
-            analysis_output = analysis_output[7:-3].strip()  
-        elif analysis_output.startswith("```"):  
-            analysis_output = analysis_output[3:-3].strip()  
-          
+    base_delay = 1   
+    max_delay = 32  
+    max_attempts = 5 
+  
+    for attempt in range(max_attempts):  
         try:  
-            return json.loads(analysis_output)  
-        except json.JSONDecodeError:  
-            return analysis_output  
-    except Exception as e:  
-        print(f"Error during filed application analysis: {e}")  
-        return None  
- 
+            response = client.chat.completions.create(  
+                model="GPT-4-Omni", messages=messages, temperature=0.2  
+            )  
+            analysis_output = response.choices[0].message.content.strip()  
+  
+            if analysis_output.startswith("```json"):  
+                analysis_output = analysis_output[7:-3].strip()  
+            elif analysis_output.startswith("```"):  
+                analysis_output = analysis_output[3:-3].strip()  
+  
+            try:  
+                return json.loads(analysis_output)  
+            except json.JSONDecodeError:  
+                return analysis_output  
+  
+        except Exception as e:  
+            if attempt == max_attempts - 1:  
+                logging.error(f"Max attempts reached. Error: {e}")  
+                return None  
+  
+            delay = min(max_delay, base_delay * (2 ** attempt))  
+            jitter = random.uniform(0, delay)  
+            logging.warning(f"Retrying in {jitter:.2f} seconds (attempt {attempt + 1}) due to error: {e}")  
+            time.sleep(jitter)  
+  
   
 def analyze_modified_application(cited_references_text, foundational_claim, figure_analysis, modified_application_details, domain, expertise, style): 
     content = f"""
@@ -888,57 +1035,65 @@ Ensure that the original intent of the claims is maintained while improving clar
         print(f"Error during modified application analysis: {e}")  
         return None  
   
-def save_analysis_to_word(analysis_output):
-    if analysis_output is None or analysis_output.strip() == "":
-        st.error("Analysis data is missing or empty.")
-        return None
-
-    # Create a new Word document
-    doc = docx.Document()
-    doc.add_heading('Filed Application Analysis Results', level=1)
-
-    # Split the analysis output into lines
-    lines = analysis_output.split('\n')
-    for line in lines:
-        line = line.strip()
-
-        if line.startswith("## "):
-            doc.add_heading(line[3:], level=2)
-        elif line.startswith("### "):
-            doc.add_heading(line[4:], level=3)
-        elif line.startswith("#### "):
-            doc.add_heading(line[5:], level=4)
-        elif line.startswith("- "):
-            doc.add_paragraph(line[2:], style='List Bullet')
-        elif re.match(r'^\d+\.', line):
-            doc.add_paragraph(line, style='List Number')
-        else:
-            # Create a new paragraph for normal or mixed text (bold and non-bold)
-            paragraph = doc.add_paragraph()
-
-            # Use regex to find text between **...** for bold words
-            # Split by bold sections while keeping bold markers for processing
-            parts = re.split(r'(\*\*.*?\*\*)', line)
-            
-            for part in parts:
-                if part.startswith("**") and part.endswith("**"):
-                    # This is the bold part, remove the '**' and set it as bold
-                    bold_text = part[2:-2]
-                    run = paragraph.add_run(bold_text)
-                    run.bold = True
-                else:
-                    # This is regular text
-                    paragraph.add_run(part)
-
-    # Save the document to a BytesIO buffer instead of writing to disk
-    buffer = BytesIO()
-    doc.save(buffer)
-    buffer.seek(0)
+  
+def save_analysis_to_word(analysis_output):  
+    if analysis_output is None or analysis_output.strip() == "":  
+        print("Analysis data is missing or empty.")  
+        return None  
+  
+    # Create a new Word document  
+    doc = docx.Document()  
+  
+    # Add a header with "Privileged & Confidential"  
+    section = doc.sections[0]  
+    header = section.header  
+    header_para = header.paragraphs[0]  
+    header_para.text = "PRIVILEGED AND CONFIDENTIAL"  
+    header_para.alignment = WD_ALIGN_PARAGRAPH.CENTER  
+  
+    # Add a heading for the document  
+    doc.add_heading("Filed Application Analysis Results", level=1)  
+  
+    # Split the analysis output into lines  
+    lines = analysis_output.split("\n")  
+    for line in lines:  
+        line = line.strip()  
+        if line.startswith("## "):  
+            doc.add_heading(line[3:], level=2)  
+        elif line.startswith("### "):  
+            doc.add_heading(line[4:], level=3)  
+        elif line.startswith("#### "):  
+            doc.add_heading(line[5:], level=4)  
+        elif line.startswith("- "):  
+            doc.add_paragraph(line[2:], style="List Bullet")  
+        elif re.match(r"^\d+\.", line):  
+            doc.add_paragraph(line, style="List Number")  
+        else:  
+            # Create a new paragraph for normal or mixed text (bold and non-bold)  
+            paragraph = doc.add_paragraph()  
+            # Use regex to find text between **...** for bold words and <u>...</u> for underlined words  
+            parts = re.split(r"(\*\*.*?\*\*|<u>.*?</u>)", line)  
+            for part in parts:  
+                if part.startswith("**") and part.endswith("**"):  
+                    # This is the bold part, remove the '**' and set it as bold  
+                    bold_text = part[2:-2]  
+                    run = paragraph.add_run(bold_text)  
+                    run.bold = True  
+                elif part.startswith("<u>") and part.endswith("</u>"):  
+                    # This is the underlined part, remove the '<u>' and '</u>' and set it as underlined  
+                    underlined_text = part[3:-4]  
+                    run = paragraph.add_run(underlined_text)  
+                    run.underline = True  
+                else:  
+                    # This is regular text  
+                    paragraph.add_run(part)  
+ 
+    # Save the document to a BytesIO buffer instead of writing to disk  
+    buffer = BytesIO()  
+    doc.save(buffer)  
+    buffer.seek(0)  
     return buffer
 
-# Define your endpoint and key  
-form_recognizer_endpoint = "https://patentocr.cognitiveservices.azure.com/"  # Replace with your actual endpoint  
-form_recognizer_api_key = "cd6b8996d93447be88d995729c924bcb"
 # Initialize session state variables  
 session_vars = [  
     'conflict_results', 'foundational_claim', 'figure_analysis', 'filed_application_analysis',  
@@ -1025,6 +1180,159 @@ def merge_pdfs(pdf_list, output_file):
     merger.write(output_file)  
     merger.close()  
     return output_file  
+def validate_office_action(uploaded_file):  
+    if not uploaded_file:  
+        st.error("No file uploaded.")  
+        return False, None, None  
+  
+    try:  
+        file_content = uploaded_file.read()  
+  
+        document_analysis_client = DocumentAnalysisClient(  
+            endpoint=form_recognizer_endpoint,  
+            credential=AzureKeyCredential(form_recognizer_api_key),  
+        )  
+  
+        poller = document_analysis_client.begin_analyze_document(  
+            "prebuilt-document", document=file_content  
+        )  
+  
+        result = poller.result()  
+  
+        application_number = None  
+        conflict_keyword = None  
+        summary_found = False  
+  
+        for page in result.pages:  
+            for line in page.lines:  
+                content = line.content.lower()  
+  
+                if "application no" in content or "control number" in content:  
+                    application_number = line.content.split()[-1]  
+  
+                if "office action summary" in content:  
+                    summary_found = True  
+  
+                if "rejected" in content and "102(a)(1)" in content:  
+                    match = re.search(r"by (\w+)", line.content)  
+                    if match:  
+                        conflict_keyword = match.group(1)  
+  
+        if application_number and summary_found:  
+            return True, application_number, conflict_keyword  
+  
+        st.error("The uploaded document is not a valid Office Action.")  
+        return False, None, None  
+  
+    except HttpResponseError as e:  
+        st.error(f"Failed to analyze the document: {e.message}")  
+        return False, None, None 
+    
+def validate_application_as_filed(uploaded_file, expected_application_number):  
+    if not uploaded_file:  
+        st.error("No file uploaded.")  
+        return False  
+  
+    if expected_application_number is None:  
+        st.error("Application number is not set.")  
+        return False  
+  
+    try:  
+        # Read the file content  
+        with open(uploaded_file, "rb") as f:  
+            file_content = f.read()  
+          
+        document_analysis_client = DocumentAnalysisClient(  
+            endpoint=form_recognizer_endpoint,  
+            credential=AzureKeyCredential(form_recognizer_api_key),  
+        )  
+  
+        poller = document_analysis_client.begin_analyze_document(  
+            "prebuilt-document", document=file_content  
+        )  
+  
+        result = poller.result()  
+  
+        for page in result.pages:  
+            for line in page.lines:  
+                if expected_application_number in line.content:  
+                    st.success("Application as Filed validated successfully!")  
+                    return True  
+  
+        st.error(f"The document does not contain the expected application number: {expected_application_number}.")  
+        return False  
+  
+    except HttpResponseError as e:  
+        st.error(f"Failed to analyze the document: {e.message}")  
+        return False  
+def match_document_name_or_pub_number(file_name, cited_docs):  
+    # Normalize and prepare regex pattern for matching  
+    file_name = file_name.lower()  
+    file_name_pattern = re.sub(r'[^a-z0-9]', '', file_name)  # Remove non-alphanumeric characters for comparison  
+  
+    for cited_doc in cited_docs:  
+        # Normalize cited document name for comparison  
+        cited_doc_name = cited_doc.lower()  
+        cited_doc_pattern = re.sub(r'[^a-z0-9]', '', cited_doc_name)  
+  
+        # Check if file name matches the cited document  
+        if re.search(file_name_pattern, cited_doc_pattern):  
+            return True  
+    return False  
+def extract_text_from_pdfs(file_path):  
+    try:  
+        document_analysis_client = DocumentAnalysisClient(  
+            endpoint=form_recognizer_endpoint,  
+            credential=AzureKeyCredential(form_recognizer_api_key),  
+        )  
+  
+        with open(file_path, "rb") as f:  
+            file_content = f.read()  
+  
+        poller = document_analysis_client.begin_analyze_document(  
+            "prebuilt-document", document=file_content  
+        )  
+        result = poller.result()  
+  
+        text = ""  
+        for page in result.pages[:2]:  
+            for line in page.lines:  
+                text += line.content + "\n"  
+        return text  
+    except HttpResponseError as e:  
+        st.error(f"Failed to analyze the document: {e.message}")  
+        return None  
+    except Exception as e:  
+        st.error(f"An unexpected error occurred: {e}")  
+        return None  
+  
+def check_match_with_llm(text, cited_docs):  
+    messages = [  
+        {  
+            "role": "system",  
+            "content": "Identify if any part of the text approximately matches any item in the given array. Respond with 'Yes' or 'No'."  
+        },  
+        {  
+            "role": "user",  
+            "content": f"Text: {text}\nCited Documents: {cited_docs}"  
+        }  
+    ]  
+  
+    try:  
+        response = client.chat.completions.create(  
+            model="GPT-4-Omni",  
+            messages=messages,  
+            temperature=0.2  
+        )  
+          
+        llm_response = response.choices[0].message.content.strip()  
+        st.write(f"LLM Response: {llm_response}")  
+  
+        match_found = llm_response.lower() == "yes"  
+        return match_found  
+    except Exception as e:  
+        st.error(f"Error during LLM check: {e}")  
+        return False  
   
   
 # Ensure session state is initialized  
@@ -1050,6 +1358,8 @@ if 'style' not in st.session_state:
     st.session_state.style = None  
 if 'filed_application_name' not in st.session_state:  
     st.session_state.filed_application_name = None  
+if 'application_number' not in st.session_state:  
+    st.session_state.application_number = None
   
 # Display the logo and title  
 st.image("AFS Innovation Logo.png", width=200)  
@@ -1063,56 +1373,75 @@ with st.expander("Step 1: Office Action", expanded=True):
   
     if conflicts_clicked:  
         if uploaded_examiner_file is not None:  
-            temp_file_path = "temp_examiner.pdf" if uploaded_examiner_file.type == "application/pdf" else "temp_examiner.docx"  
-            with open(temp_file_path, "wb") as f:  
-                f.write(uploaded_examiner_file.read())  
+            is_valid, application_number, conflict_keyword = validate_office_action(uploaded_examiner_file)
+            if application_number:
+                  st.session_state.application_number = application_number
   
-            if uploaded_examiner_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":  
-                temp_pdf_path = "temp_examiner_converted.pdf"  
-                pdf_path = convert_docx_to_pdf(temp_file_path, temp_pdf_path)  
-                if pdf_path:  
-                    temp_file_path = pdf_path  
-                else:  
-                    st.error("Failed to convert DOCX to PDF.")  
+            if is_valid and uploaded_examiner_file is not None: 
+                # Reset file pointer to read again  
+                uploaded_examiner_file.seek(0) 
+                temp_file_path = "temp_examiner.pdf" if uploaded_examiner_file.type == "application/pdf" else "temp_examiner.docx"  
+                with open(temp_file_path, "wb") as f:  
+                    f.write(uploaded_examiner_file.read())  
   
-            if os.path.exists(temp_file_path):  
-                extracted_examiner_text = extract_text_from_pdf(temp_file_path)  
-                if extracted_examiner_text:  
-                    # Process the extracted text  
-                    processed_examiner_text = process_text(extracted_examiner_text)  
-                      
-                    domain, expertise, style = determine_domain_expertise(processed_examiner_text)  
-                    if domain and expertise and style:  
-                        st.session_state.domain = domain  
-                        st.session_state.expertise = expertise  
-                        st.session_state.style = style  
-  
-                        conflict_results_raw = check_for_conflicts(processed_examiner_text, domain, expertise, style)  
-                        if conflict_results_raw:  
-                            st.session_state.conflict_results = conflict_results_raw  
-                            st.session_state.foundational_claim = conflict_results_raw.get("foundational_claim", "")  
-                            st.session_state.cited_documents = conflict_results_raw.get("documents_referenced", [])  
-                            st.success("Conflicts checked successfully!")  
-                        else:  
-                            st.error("Failed to check for conflicts.")  
-                    else:  
-                        st.error("Failed to determine domain expertise.")  
-                else:  
-                    st.error("Failed to extract text from the examiner document.")  
-                os.remove(temp_file_path)  
                 if uploaded_examiner_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":  
-                    if os.path.exists(temp_pdf_path):  
-                        os.remove(temp_pdf_path)  
+                    temp_pdf_path = "temp_examiner_converted.pdf"  
+                    pdf_path = convert_docx_to_pdf(temp_file_path, temp_pdf_path)  
+                    if pdf_path:  
+                        temp_file_path = pdf_path  
+                    else:  
+                        st.error("Failed to convert DOCX to PDF.")  
+  
+                if os.path.exists(temp_file_path):  
+                    extracted_examiner_text = extract_text_from_pdf(temp_file_path)  
+                    if extracted_examiner_text:  
+                        # Process the extracted text  
+                        processed_examiner_text = process_text(extracted_examiner_text)  
+  
+                        domain, expertise, style = determine_domain_expertise(processed_examiner_text)  
+                        if domain and expertise and style:  
+                            st.session_state.domain = domain  
+                            st.session_state.expertise = expertise  
+                            st.session_state.style = style  
+  
+                            conflict_results_raw = check_for_conflicts(processed_examiner_text, domain, expertise, style)  
+                            if conflict_results_raw:  
+                                st.session_state.conflict_results = conflict_results_raw  
+                                st.session_state.foundational_claim = conflict_results_raw.get("foundational_claim", "")  
+                                st.session_state.cited_documents = conflict_results_raw.get("documents_referenced", [])  
+                                st.success("Conflicts checked successfully!")  
+                            else:  
+                                st.error("Failed to check for conflicts.")  
+                        else:  
+                            st.error("Failed to determine domain expertise.")  
+                    else:  
+                        st.error("Failed to extract text from the examiner document.")  
+                      
+                    os.remove(temp_file_path)  
+                    if uploaded_examiner_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":  
+                        if os.path.exists(temp_pdf_path):  
+                            os.remove(temp_pdf_path)  
+                else:  
+                    st.error("Failed to process the uploaded file.")  
             else:  
-                st.error("Failed to process the uploaded file.")  
+                st.error("The uploaded document is not a valid Office Action.")  
         else:  
             st.warning("Please upload the examiner document first.")  
   
-# Display Cited Documents Referenced after Step 1  
+# Check if cited documents exist  
 if st.session_state.get("cited_documents") is not None:  
     st.write("### Cited Documents Referenced:")  
-    cited_docs_df = pd.DataFrame(st.session_state.cited_documents, columns=["Document Name"])  
-    st.table(cited_docs_df)  
+  
+    # Create a DataFrame with numbering starting from 1  
+    cited_docs_df = pd.DataFrame({  
+        "No.": range(1, len(st.session_state.cited_documents) + 1),  
+        "Document Name": st.session_state.cited_documents  
+    })  
+  
+    # Use st.dataframe with a container to ensure full width  
+    with st.container():  
+        st.dataframe(cited_docs_df.set_index("No."), use_container_width=True)  
+
   
 # Step 2: Upload Referenced Document and Analyze Figures  
 if st.session_state.get("conflict_results") is not None:  
@@ -1124,25 +1453,37 @@ if st.session_state.get("conflict_results") is not None:
         if analyze_figures_clicked:  
             if uploaded_ref_files:  
                 ref_texts = []  
+                cited_docs = st.session_state.cited_documents  
+                continue_processing = False  
+  
                 for uploaded_ref_file in uploaded_ref_files:  
                     with open(f"temp_{uploaded_ref_file.name}", "wb") as f:  
                         f.write(uploaded_ref_file.read())  
-                    extracted_ref_text = extract_text_from_pdf(f"temp_{uploaded_ref_file.name}")  
-                    # Process the extracted text  
-                    processed_ref_text = process_text(extracted_ref_text)  
-                    ref_texts.append(processed_ref_text)  
+  
+                    extracted_ref_text = extract_text_from_pdfs(f"temp_{uploaded_ref_file.name}")  
+                    if extracted_ref_text:  
+                        match_found = check_match_with_llm(extracted_ref_text, cited_docs)  
+                        if match_found:  
+                            processed_ref_text = process_text(extracted_ref_text)  
+                            ref_texts.append(processed_ref_text)  
+                            continue_processing = True  # Set flag to continue  
+                        else:  
+                            st.warning(f"No match for cited documents was found in {uploaded_ref_file.name}.")  
+  
                     os.remove(f"temp_{uploaded_ref_file.name}")  
   
-                figure_analysis_results = extract_figures_and_text(  
-                    st.session_state.conflict_results, extracted_ref_text,  
-                    st.session_state.domain, st.session_state.expertise, st.session_state.style  
-                )  
+                if continue_processing:  
+                    # Perform figure analysis if a match was found  
+                    figure_analysis_results = extract_figures_and_text(  
+                        st.session_state.conflict_results, " ".join(ref_texts),  
+                        st.session_state.domain, st.session_state.expertise, st.session_state.style  
+                    )  
   
-                if figure_analysis_results:  
-                    st.session_state.figure_analysis = figure_analysis_results  
-                    st.success("Figure analysis completed successfully!")  
-                else:  
-                    st.error("Failed to analyze figures and cited text.")  
+                    if figure_analysis_results:  
+                        st.session_state.figure_analysis = figure_analysis_results  
+                        st.success("Figure analysis completed successfully!")  
+                    else:  
+                        st.error("Failed to analyze figures and cited text.")  
             else:  
                 st.warning("Please upload the referenced documents first.")  
   
@@ -1200,7 +1541,7 @@ if st.session_state.get("figure_analysis") is not None:
                                 processed_filed_app_text = process_text(extracted_filed_app_text)  
                                   
                                 filed_app_details = extract_details_from_filed_application(  
-                                    extracted_filed_app_text,  
+                                    processed_filed_app_text,  
                                     st.session_state.foundational_claim,  
                                     st.session_state.domain,  
                                     st.session_state.expertise,  
@@ -1250,56 +1591,70 @@ if st.session_state.get("figure_analysis") is not None:
                 if uploaded_filed_app is not None:  
                     with open("temp_filed.pdf", "wb") as f:  
                         f.write(uploaded_filed_app.read())  
-                    extracted_filed_app_text = extract_text_from_pdf("temp_filed.pdf")  
-                    os.remove("temp_filed.pdf")  
+                      
+                    # Validate the uploaded filed application  
+                    with open("temp_filed.pdf", "rb") as f:   
+                        is_valid_filed = validate_application_as_filed("temp_filed.pdf", st.session_state.application_number)  
   
-                    if extracted_filed_app_text:  
-                        # Process the extracted text  
-                        processed_filed_app_text = process_text(extracted_filed_app_text)  
+                    if is_valid_filed:  
+                        # Reset the file pointer before reading again    
+                        uploaded_filed_app.seek(0)  
+                        extracted_filed_app_text = extract_text_from_pdf("temp_filed.pdf")  
                           
-                        st.session_state.filed_application_name = uploaded_filed_app.name  
-                        filed_app_details = extract_details_from_filed_application(  
-                            processed_filed_app_text,  
-                            st.session_state.foundational_claim,  
-                            st.session_state.domain,  
-                            st.session_state.expertise,  
-                            st.session_state.style  
-                        )  
-                        if filed_app_details:  
-                            filed_app_details_json = json.dumps(filed_app_details, indent=2)  
-                            st.session_state.filed_application_analysis = filed_app_details_json  
+                        os.remove("temp_filed.pdf")  
   
-                            analysis_results = analyze_filed_application(  
-                                filed_app_details_json,  
+                        if extracted_filed_app_text:  
+                            # Process the extracted text  
+                            processed_filed_app_text = process_text(extracted_filed_app_text)  
+                            st.session_state.filed_application_name = uploaded_filed_app.name  
+  
+                            filed_app_details = extract_details_from_filed_application(  
+                                processed_filed_app_text,  
                                 st.session_state.foundational_claim,  
-                                st.session_state.figure_analysis,  
                                 st.session_state.domain,  
                                 st.session_state.expertise,  
                                 st.session_state.style  
                             )  
-                            if analysis_results:  
-                                st.session_state.filed_application_analysis = analysis_results  
-                                st.success("Filed application analysis completed successfully!")  
-                                docx_buffer = save_analysis_to_word(analysis_results)  
-                                if docx_buffer:  
-                                    filed_application_name = st.session_state.filed_application_name.replace(" ", "_")  
-                                    st.download_button(  
-                                        label="Download Analysis Results",  
-                                        data=docx_buffer,  
-                                        file_name=f"{filed_application_name}_ANALYSIS.docx",  
-                                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",  
-                                        key="filed_application_download"  
-                                    )  
+  
+                            if filed_app_details:  
+                                filed_app_details_json = json.dumps(filed_app_details, indent=2)  
+                                st.session_state.filed_application_analysis = filed_app_details_json  
+  
+                                analysis_results = analyze_filed_application(  
+                                    filed_app_details_json,  
+                                    st.session_state.foundational_claim,  
+                                    st.session_state.figure_analysis,  
+                                    st.session_state.domain,  
+                                    st.session_state.expertise,  
+                                    st.session_state.style  
+                                )  
+  
+                                if analysis_results:  
+                                    st.session_state.filed_application_analysis = analysis_results  
+                                    st.success("Filed application analysis completed successfully!")  
+                                    docx_buffer = save_analysis_to_word(analysis_results)  
+                                    if docx_buffer:  
+                                        filed_application_name = st.session_state.filed_application_name.replace(" ", "_")  
+                                        st.download_button(  
+                                            label="Download Analysis Results",  
+                                            data=docx_buffer,  
+                                            file_name=f"{filed_application_name}_ANALYSIS.docx",  
+                                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",  
+                                            key="filed_application_download"  
+                                        )  
+                                else:  
+                                    st.error("Failed to analyze the filed application.")  
                             else:  
-                                st.error("Failed to analyze the filed application.")  
+                                st.error("Failed to extract details from the filed application.")  
                         else:  
-                            st.error("Failed to analyze the filed application.")  
+                            st.error("Failed to extract text from the filed application document.")  
                     else:  
-                        st.error("Failed to extract text from the filed application document.")  
+                        st.error("Validation of the filed application failed.")  
+                        os.remove("temp_filed.pdf")  
                 else:  
                     st.warning("Please upload the filed application first.")  
-  
-# Step 4: Pending Claims  
+                
+# STEP 4: Pending Claims Analysis
 if st.session_state.get("filed_application_analysis") is not None:  
     with st.expander("Step 4: Pending Claims", expanded=True):  
         st.write("### Do you have a Pending Claims Document to Analyze?")  
@@ -1322,60 +1677,65 @@ if st.session_state.get("filed_application_analysis") is not None:
                         with open(file_path, "wb") as f:  
                             f.write(uploaded_pending_claims_file.read())  
   
-                        if uploaded_pending_claims_file.type == "application/pdf":  
-                            extracted_pending_claims_text = extract_text_from_pdf(file_path)  
-                        elif uploaded_pending_claims_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":  
-                            extracted_pending_claims_text = extract_text_from_docx(file_path)  
+                        # Validate the pending claims document  
+                        is_valid_pending_claims = validate_application_as_filed(file_path, st.session_state.application_number)  
   
-                        if extracted_pending_claims_text:  
-                            # Process the extracted text  
-                            processed_pending_claims_text = process_text(extracted_pending_claims_text)  
+                        if is_valid_pending_claims:  
+                            if uploaded_pending_claims_file.type == "application/pdf":  
+                                extracted_pending_claims_text = extract_text_from_pdf(file_path)  
+                            elif uploaded_pending_claims_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":  
+                                extracted_pending_claims_text = extract_text_from_docx(file_path)  
   
-                            modified_filed_application_results = extract_and_modify_filed_application(  
-                                st.session_state.filed_application_analysis,  
-                                processed_pending_claims_text,  
-                                st.session_state.domain,  
-                                st.session_state.expertise,  
-                                st.session_state.style  
-                            )  
+                            if extracted_pending_claims_text:  
+                                # Process the extracted text  
+                                processed_pending_claims_text = process_text(extracted_pending_claims_text)  
   
-                            if modified_filed_application_results:  
-                                st.session_state.modified_filed_application_results = modified_filed_application_results  
-                                st.success("Modified filed application analysis completed successfully!")  
-  
-                                pending_claims_analysis_results = analyze_modified_application(  
+                                modified_filed_application_results = extract_and_modify_filed_application(  
+                                    st.session_state.filed_application_analysis,  
                                     processed_pending_claims_text,  
-                                    st.session_state.foundational_claim,  
-                                    st.session_state.figure_analysis,  
-                                    modified_filed_application_results,  
                                     st.session_state.domain,  
                                     st.session_state.expertise,  
                                     st.session_state.style  
                                 )  
   
-                                if pending_claims_analysis_results:  
-                                    st.session_state.pending_claims_analysis = pending_claims_analysis_results  
-                                    st.success("Pending claims analysis completed successfully!")  
+                                if modified_filed_application_results:  
+                                    st.session_state.modified_filed_application_results = modified_filed_application_results  
+                                    st.success("Modified filed application analysis completed successfully!")  
   
-                                    docx_buffer = save_analysis_to_word(pending_claims_analysis_results)  
-                                    if docx_buffer:  
-                                        filed_application_name = st.session_state.filed_application_name.replace(" ", "_")  
-                                        st.download_button(  
-                                            label="Download Analysis Results",  
-                                            data=docx_buffer,  
-                                            file_name=f"{filed_application_name}_ANALYSIS.docx",  
-                                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",  
-                                            key="pending_claims_download"  
-                                        )  
+                                    pending_claims_analysis_results = analyze_modified_application(  
+                                        processed_pending_claims_text,  
+                                        st.session_state.foundational_claim,  
+                                        st.session_state.figure_analysis,  
+                                        modified_filed_application_results,  
+                                        st.session_state.domain,  
+                                        st.session_state.expertise,  
+                                        st.session_state.style  
+                                    )  
+  
+                                    if pending_claims_analysis_results:  
+                                        st.session_state.pending_claims_analysis = pending_claims_analysis_results  
+                                        st.success("Pending claims analysis completed successfully!")  
+  
+                                        docx_buffer = save_analysis_to_word(pending_claims_analysis_results)  
+                                        if docx_buffer:  
+                                            filed_application_name = st.session_state.filed_application_name.replace(" ", "_")  
+                                            st.download_button(  
+                                                label="Download Analysis Results",  
+                                                data=docx_buffer,  
+                                                file_name=f"{filed_application_name}_ANALYSIS.docx",  
+                                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",  
+                                                key="pending_claims_download"  
+                                            )  
+                                    else:  
+                                        st.error("Failed to analyze the pending claims.")  
                                 else:  
-                                    st.error("Failed to analyze the pending claims.")  
+                                    st.error("Failed to modify the filed application based on pending claims.")  
                             else:  
-                                st.error("Failed to modify the filed application based on pending claims.")  
+                                st.error("Failed to extract text from the pending claims document.")  
                         else:  
-                            st.error("Failed to extract text from the pending claims document.")  
+                            st.error("Validation of the pending claims document failed.")  
                 else:  
                     st.warning("Please upload the pending claims document first.")  
-  
 # Option to download results if there are no pending claims  
 if st.session_state.get("filed_application_analysis") and st.session_state.pending_claims_analysis is None:  
     docx_buffer = save_analysis_to_word(st.session_state.filed_application_analysis)  
