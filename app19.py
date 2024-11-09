@@ -917,92 +917,180 @@ def analyze_modified_application(cited_references_text, foundational_claim, figu
 
     Using this expertise, experience, and educational background, analyze the provided patent application document with a focus on its technical accuracy, clarity, adherence to patent application standards, novelty, non-obviousness, and overall feasibility.
     """ 
+     # Step 2: Include the few-shot example  
+    few_shot_example = """  
+    **Example Amendment and Argument:**  
+      
+    **Amendment 1: Enhanced Communication Protocol**  
+      
+    **Original Claim Language:**  
+    "A communication system comprising a transmitter and receiver."  
+      
+    **Proposed Amended Language:**  
+    "A communication system comprising a transmitter and receiver, wherein the transmitter is configured to utilize an adaptive frequency hopping protocol to dynamically adjust communication channels based on interference levels."  
+      
+    **Derivation and Reasoning:**  
+    - **Source Reference**: Derived from Paragraphs [0040]-[0045] and Figures 4A-4D of the application.  
+    - **Reasoning**: The amendment specifies the use of an "adaptive frequency hopping protocol" and includes dynamic adjustments based on interference levels, adding specificity and distinguishing over prior art that lacks adaptive frequency hopping.  
+      
+    **Supporting Arguments:**  
+    - **Novelty**: The cited reference does not disclose a communication system utilizing an adaptive frequency hopping protocol that adjusts based on interference levels.  
+    - **Non-Obviousness**: Combining a communication system with an adaptive frequency hopping protocol introduces an unexpected technical advantage by improving communication reliability and reducing interference, which is not suggested or rendered obvious by the prior art.  
+    - **Technical Advantages**: Enhances communication reliability and reduces interference, as detailed in Paragraph [0046] of the application.  
+    - **Addressing Examiner's Rejection**: The prior art only teaches static frequency selection methods, thus the amendment overcomes the rejection by introducing adaptive frequency hopping functionality not suggested in the cited reference.  
+    **Propose New Arguments or Amendments:**
+    -**Amendment 1:** Enhanced Communication Protocol**  
+      
+    **Original Claim Language:**  
+    "A communication system comprising a transmitter and receiver."  
+      
+    **Proposed Amended Language:**  
+    "A communication system comprising a transmitter and receiver, <u> wherein the transmitter is configured to utilize an adaptive frequency hopping protocol to dynamically adjust communication channels based on interference levels </u>." 
+    
+    
+    """  
+      
+    # Including another few-shot example  
+    text_a = """  
+    **Example Analysis**  
+      
+    **Key Features of Independent Claim 1**  
+    • **Multiparameter Leadset:** Configured to interface with a monitoring device for monitoring multiple health indicators of a patient.  
+    • **Single Patient Plug:** Having a plurality of monitoring contacts.  
+      
+    **Key Features of Cited Reference(Naylor):**  
+    • **Multiparameter Leadset (Naylor)**: Depicted in Figure 2, comprising a temperature sensor, non-invasive pulse oximetry sensor, and EKG sensor.  
+    • **Junction Box**: Connects to a patient monitor via a common output cable, with receptacles for each sensor plug (Figure 2: junction box 226).  
+      
+    **Examiner’s Analysis:**  
+    The examiner rejected the application based on U.S.C 103 (Obviousness), asserting that the claimed features are either disclosed or obvious in light of the Naylor reference combined with Morley for the interconnection feature. The examiner interprets the cited reference as teaching or suggesting all elements of the foundational claim, including the use of a multiparameter leadset with a single patient plug and various patient leads for different health indicators. The interconnection feature is deemed obvious for better wire management.  
+      
+    **Novelty Analysis (U.S.C 102 - Lack of Novelty):**  
+    Comparing the foundational claim with the Naylor reference:  
+    • **Multiparameter Leadset**: Both the foundational claim and Naylor describe a multiparameter leadset.  
+    • **Single Patient Plug**: Naylor's junction box 226 serves a similar function.  
+      
+    **Non-Obviousness Analysis (U.S.C 103 - Obviousness):**  
+    The foundational claim may be considered obvious in light of Naylor combined with Morley:  
+    • The interconnection feature, while not explicitly taught by Naylor, is deemed an obvious modification for better wire management as suggested by Morley.  
+      
+    **Conclusion:**  
+    The examiner’s rejection under U.S.C 103 (Obviousness) or U.S.C 102 ( Lack of Novelty)[Depending on which examiner claims] may be justified as the combination of features in the foundational claim appears to be an obvious modification of the Naylor reference, with the interconnection feature suggested by Morley.  
+    """ 
     prompt = f"""  
     Analyze the modified application based on the foundational claim:{json.dumps(foundational_claim, indent=2)}and the figure analysis results:{json.dumps(figure_analysis, indent=2)}and the modified application details:{json.dumps(modified_application_details, indent=2)}and the cited references:{json.dumps(cited_references_text, indent=2)}  
 Assess whether the examiner's rejection of the application under U.S.C 102 (Lack of Novelty) or U.S.C 103 (Obviousness) is justified by comparing it with the cited references text.
-IMPORTANT FORMATTING RULES:
-Numbering and Formatting:
-Use bullet points (•) instead of numbers when listing items.
-Do not include markdown formatting in your response.
-Bolden only the headings.
-Make your explanations lengthy and cite the sources correctly.
-Give amendments for all key features in foundational claim.
-Do NOT put N/A anywhere and enclose words within asterisks(**)
-Key Features of Foundational Claim:
-Extract and list the key features of the foundational claim.
-Ensure to include structural details, functional aspects, and any specific configurations mentioned in the claim.
-:Key Features of Cited Reference:
-Extract and list the key features of the cited reference.(also include where it is located in the cited text)
-Highlight any similarities or differences in structure, function, and configuration compared to the foundational claim.
+   
+    IMPORTANT FORMATTING RULES:  
+    Numbering and Formatting: Use bullet points (•) instead of numbers when listing items.  
+    Do not include markdown formatting in your response, except for bolding headings and sub-headings, and underlining as specified.  
+    Bold all headings and sub-headings for clarity.
+    Underline new language in the 'Proposed Amended Language' by enclosing it within '<u>' and '</u>' tags.
+    Provide detailed explanations and cite the sources correctly.  
+    Propose amendments for all key features in foundational claim. 
+    Do NOT include "N/A" anywhere and enclose words within asterisks(**)  
+    Avoid one-line explanations; provid thorough and detailed analysis
+    Maintain concise formatting without extra line spacing
+    Add a conclusion after proposing amendments.
+    The provided examples are for structural guidance only; do not replicate them verbatim.
+    Avoid using words like "only" that may downplay the content
 
-Examiner’s Analysis:
-Describe the examiner’s analysis and the basis for rejection.
-Summarize how the examiner interprets the cited reference in relation to the foundational claim.
-Identify whether the rejection is based on U.S.C 102 (Lack of Novelty) or U.S.C 103 (Obviousness).
+           
+    Key Features of Independent Claim with Number:  
+    Extract and list the key features of the foundational claim. Ensure to include structural details, functional aspects, and any specific configurations mentioned in the claim.  
+      
+    Key Features of Cited Reference:  
+    Extract and list the key features of the cited reference (also include where it is located in the cited text such as paragraph or figure). Highlight any similarities or differences in structure, function, and configuration compared to the foundational claim.  
+      
+    Examiner’s Analysis:  
+    Describe the examiner’s analysis and the basis for rejection. Summarize how the examiner interprets the cited reference in relation to the foundational claim. Identify whether the rejection is based on U.S.C 102 (Lack of Novelty) or U.S.C 103 (Obviousness).  
+      
+    Novelty Analysis (U.S.C 102 - Lack of Novelty):  
+    Compare the foundational claim with the cited reference to determine if the claim lacks novelty. Identify if all elements of the foundational claim are disclosed in the cited reference. Provide a detailed side-by-side comparison of each element.  
+      
+    Non-Obviousness Analysis (U.S.C 103 - Obviousness):  
+    Analyze whether the foundational claim is obvious in light of the cited reference. Consider if the combination of features in the foundational claim would have been obvious to a person skilled in the art at the time of the invention. Discuss any differences that might contribute to non-obviousness.  
+      
+    Conclusion:  
+    Provide a conclusion on whether the examiner’s rejection under U.S.C 102 (Lack of Novelty) or U.S.C 103 (Obviousness) may be justified or not. Summarize the key points that support or refute the examiner’s rejection.  
+      
+    Potential Areas for Distinction:  
+    Identify areas where the foundational claim can be distinguished from the cited reference. Focus on unique structural features, specific materials, configurations, or functions not disclosed in the cited reference.  
+      
+    Proposed Amendments and Arguments:  
+    For each key feature point in the foundational claim, propose specific amendments separately. NOTE: for all the points in the foundational claim, it is mandatory to propose amendments.  
+    Present original and proposed versions, highlighting new features, specific materials, or configurations. **Underline** the new language proposed by enclosing it within '<u>' and '</u>' tags. 
+      
+    Format for Each Amendment:  
+    Amendment [Number]: [Feature Title]  
+    Original Claim Language:  
+    "[Insert the exact original feature description from the foundational claim.]"  
+    Proposed Amended Language:  
+    "[Insert the enhanced feature description, incorporating new details, specific materials, or configurations.  **Underline** the new language proposed by enclosing it within '<u>' and '</u>' tags.]"  
+    Derivation of Amendment:  
+    Source Reference: Cite specific sections, paragraphs, figures, or embodiments from the application that support the amendment. Example: "Derived from Paragraph [0123] and Figure 5 of the application."  
+    Reasoning: Explain why the amendment was made, detailing how it enhances specificity, overcomes prior art, or adds technical advantages. Highlight any differences from the cited references. Emphasize any technical advantages or improvements introduced by the amendments.  
+      
+    IMPORTANT NOTE WHILE PROPOSING ARGUMENTS:  
+    Guidance for Proposing Amendments and Arguments:  
+    When proposing amendments:  
+    Be Specific: Clearly identify which feature you are amending and provide detailed enhancements.  
+    Highlight Novel Elements: Emphasize new details such as specific materials, unique configurations, or innovative steps that are not present in the cited reference.  
+    Refer to Sources: Cite sections of the application or figures from which the amendments and supporting arguments are drawn to reinforce their basis.  
+    Maintain Claim Integrity: Ensure that the proposed amendments do not alter the fundamental essence of the original claim but enhance its patentability.  
+      
+    When crafting arguments to the examiner:  
+    Address Rejection Points: Directly counter the examiner's reasons for rejection by highlighting differences between the amended claim and the cited reference.  
+    Emphasize Novelty and Non-Obviousness: Explain why the amended features are new and not obvious, providing clear distinctions from the prior art.  
+    Use Supporting Evidence: Reference specific examples, embodiments, or descriptions in the application that support your arguments.  
+    Be Persuasive: Articulate the advantages and unique aspects of the invention that merit patent protection.  
+      
+    Identify Limitations in Current Claims:  
+    Identify any limitations or weaknesses in the current claims. Propose specific language or structural changes to address these limitations. Ensure that the proposed changes do not alter the original intent of the claims.  
+      
+    Propose New Arguments or Amendments:  
+    Suggest additional arguments or amendments to further distinguish the foundational claim from the cited prior art. Include multiple amendments for thorough differentiation. Ensure that the original intent of the claims is maintained while improving clarity and scope.  
+    Original Claim Language:  
+    "[Insert the exact original feature description from the foundational claim.]"  
+    Proposed Amended Language:  
+    "[Insert the enhanced feature description, incorporating new details, specific materials, or configurations.**Underline** the new language proposed by enclosing it within '<u>' and '</u>' tags.]"  
+    Derivation of Amendment:  
+    Source Reference: Cite specific sections, paragraphs, figures, or embodiments from the application that support the amendment. Example: "Derived from Paragraph [0123] and Figure 5 of the application."  
+    Reasoning: Explain why the amendment was made, detailing how it enhances specificity, overcomes prior art, or adds technical advantages. Highlight any differences from the cited references. Emphasize any technical advantages or improvements introduced by the amendments.  
 
-Novelty Analysis (U.S.C 102 - Lack of Novelty):
-Compare the foundational claim with the cited reference to determine if the claim lacks novelty.
-Identify if all elements of the foundational claim are disclosed in the cited reference.
-Provide a detailed side-by-side comparison of each element.
-
-Non-Obviousness Analysis (U.S.C 103 - Obviousness):
-Analyze whether the foundational claim is obvious in light of the cited reference.
-Consider if the combination of features in the foundational claim would have been obvious to a person skilled in the art at the time of the invention.
-Discuss any differences that might contribute to non-obviousness.
-
-Conclusion:
-Provide a conclusion on whether the examiner’s rejection under U.S.C 102 (Lack of Novelty) or U.S.C 103 (Obviousness) is justified.
-Summarize the key points that support or refute the examiner’s rejection.
-
-Potential Areas for Distinction:
-Identify areas where the foundational claim can be distinguished from the cited reference.
-Focus on unique structural features, specific materials, configurations, or functions not disclosed in the cited reference.
-
-Proposed Amendments and Arguments:
-For each key feature point in the foundational claim, propose specific amendments separately. NOTE: for all the points in the foundational claim, it is mandatory to propose amendments.
-Present original and proposed versions, highlighting new features, specific materials, or configurations.
-Amendment [Number]: [Feature]
-Original: "[Original feature description...]"
-Proposed: "[Enhanced feature description with new details, specific materials, or configurations...]"
-Provide arguments supporting novelty and non-obviousness over the cited reference.
-Emphasize any technical advantages or improvements introduced by the amendments.
-IMPORTANT NOTE WHILE PROPOSING ARGUMENTS:
-'''\Guidance for Proposing Amendments and Arguments:
-When proposing amendments:
-
-Be Specific: Clearly identify which feature you are amending and provide detailed enhancements.
-Highlight Novel Elements: Emphasize new details such as specific materials, unique configurations, or innovative steps that are not present in the cited reference.
-Refer to Sources: Cite sections of the application or figures from which the amendments and supporting arguments are drawn to reinforce their basis.
-Maintain Claim Integrity: Ensure that the proposed amendments do not alter the fundamental essence of the original claim but enhance its patentability.
-When crafting arguments to the examiner:
-Address Rejection Points: Directly counter the examiner's reasons for rejection by highlighting differences between the amended claim and the cited reference.
-Emphasize Novelty and Non-Obviousness: Explain why the amended features are new and not obvious, providing clear distinctions from the prior art.
-Use Supporting Evidence: Reference specific examples, embodiments, or descriptions in the application that support your arguments.
-Be Persuasive: Articulate the advantages and unique aspects of the invention that merit patent protection.\'''
-
-Identify Limitations in Current Claims:
-Identify any limitations or weaknesses in the current claims.
-Propose specific language or structural changes to address these limitations.
-Ensure that the proposed changes do not alter the original intent of the claims.
-
-Propose New Arguments or Amendments:
-Suggest additional arguments or amendments to further distinguish the foundational claim from the cited prior art.
-Include multiple amendments for thorough differentiation.
-Ensure that the original intent of the claims is maintained while improving clarity and scope.
+    NOTE:
+    Ensure all headings and sub-headings are bolded as demonstrated in the examples.
+    Maintain the specified formatting to align with the analysis guidelines.
+    Provide detailed explanations in each section, referencing specific parts of the application and cited references.
+    Avoid using markdown formatting beyond bolding headings, as per the instructions.
+    In each **Proposed Amended Language**, the new language introduced to enhance the claim is **underlined** by enclosing it within '<u>' and '</u>' tags to clearly highlight the additions.
+    
+    Additional Guidance:
+    Structure: Follow the sequential order of sections as outlined in the analysis guidelines.
+    Detailing: Expand on explanations, providing in-depth reasoning and evidence.
+    Clarity: Use clear and precise language to articulate points effectively.
+    Consistency: Keep the formatting consistent throughout the analysis.
     """  
       
     messages = [  
         {  
             "role": "system",  
-            "content": content,
-
+            "content": content,  
         },  
         {  
             "role": "user",  
             "content": prompt,  
         },  
+        {  
+            "role": "user",  
+            "content": few_shot_example,  # Including the first few-shot example  
+        },  
+        {  
+            "role": "user",  
+            "content": text_a,  # Including TEXT A as another few-shot example  
+        },  
     ]  
-      
+        
     try:  
         response = client.chat.completions.create(  
             model="GPT-4-Omni", messages=messages, temperature=0.6  
