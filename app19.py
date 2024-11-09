@@ -556,35 +556,29 @@ def extract_details_from_filed_application(filed_application_text, foundational_
 def extract_and_modify_filed_application(filed_application_details, pending_claims_text, domain, expertise, style):  
     """  
     Extract details from the pending claims and modify the filed application details.  
-    """
-    content = f"""
-    You are now assuming the role of a deeply specialized expert in {domain} as well as a comprehensive understanding of patent law specific to the mentioned domain. Your expertise includes:
-
-    1. {domain}
-    2. Patent Law Proficiency: 
-    a. Skilled in interpreting and evaluating patent claims, classifications, and legal terminologies.
-    b. Knowledgeable about the structure and requirements of patent applications.
-    c. Expertise in comparing similar documents for patent claims under sections U.S.C 102 (novelty) and U.S.C 103 (non-obviousness).
-
-    3. {expertise}
-    4. Capability to Propose Amendments:
-    a. Experienced in responding to examiners’ assertions or rejections of claims.
-    b. Skilled in proposing suitable amendments to patent claims to address rejections under U.S.C 102 (novelty) and U.S.C 103 (non-obviousness).
-    c. Proficient in articulating and justifying amendments to ensure compliance with patentability requirements.
-
-    Adopt a {style} suitable for analyzing patent applications in the given domain and subject matter. Your analysis should include:
-
-    a. A thorough evaluation of the technical details and functionalities described in the patent application.
-    b. An assessment of the clarity and precision of the technical descriptions and diagrams.
-    c. An analysis of the novelty (under U.S.C 102) and non-obviousness (under U.S.C 103) of the subject matter by comparing it with similar existing documents.
-    d. Feedback on the strengths and potential areas for improvement in the document.
-    e. A determination of whether the invention meets the criteria for patentability under sections U.S.C 102 and U.S.C 103.
-    f. Proposals for suitable amendments to the claims in response to potential examiners’ assertions or rejections, ensuring the claims are robust and meet patentability standards.
-
-    Using this expertise, experience, and educational background, analyze the provided patent application document with a focus on its technical accuracy, clarity, adherence to patent application standards, novelty, non-obviousness, and overall feasibility.
     """  
-    
-    global domain_subject_matter, experience_expertise_qualifications, style_tone_voice   
+    content = f"""  
+    You are now assuming the role of a deeply specialized expert in {domain} as well as a comprehensive understanding of patent law specific to the mentioned domain. Your expertise includes:  
+    1. {domain}  
+    2. Patent Law Proficiency:  
+        a. Skilled in interpreting and evaluating patent claims, classifications, and legal terminologies.  
+        b. Knowledgeable about the structure and requirements of patent applications.  
+        c. Expertise in comparing similar documents for patent claims under sections U.S.C 102 (novelty) and U.S.C 103 (non-obviousness).  
+    3. {expertise}  
+    4. Capability to Propose Amendments:  
+        a. Experienced in responding to examiners’ assertions or rejections of claims.  
+        b. Skilled in proposing suitable amendments to patent claims to address rejections under U.S.C 102 (novelty) and U.S.C 103 (non-obviousness).  
+        c. Proficient in articulating and justifying amendments to ensure compliance with patentability requirements.  
+    Adopt a {style} suitable for analyzing patent applications in the given domain and subject matter. Your analysis should include:  
+    a. A thorough evaluation of the technical details and functionalities described in the patent application.  
+    b. An assessment of the clarity and precision of the technical descriptions and diagrams.  
+    c. An analysis of the novelty (under U.S.C 102) and non-obviousness (under U.S.C 103) of the subject matter by comparing it with similar existing documents.  
+    d. Feedback on the strengths and potential areas for improvement in the document.  
+    e. A determination of whether the invention meets the criteria for patentability under sections U.S.C 102 and U.S.C 103.  
+    f. Proposals for suitable amendments to the claims in response to potential examiners’ assertions or rejections, ensuring the claims are robust and meet patentability standards.  
+    Using this expertise, experience, and educational background, analyze the provided patent application document with a focus on its technical accuracy, clarity, adherence to patent application standards, novelty, non-obviousness, and overall feasibility.  
+    """  
+  
     prompt = f"""  
     Analyze the following pending claims text and modify the filed application details accordingly.  
     Pending Claims Text: {pending_claims_text}  
@@ -592,7 +586,8 @@ def extract_and_modify_filed_application(filed_application_details, pending_clai
     Instructions:  
     1. Identify and extract all technical details from the pending claims that relate to the foundational claim.  
     2. Modify the filed application details based on the extracted details from the pending claims.  
-    3. Ensure that any modifications include specific references to the paragraphs or sections in the pending claims where they are found.NOTE:Extract in English.  
+    3. Ensure that any modifications include specific references to the paragraphs or sections in the pending claims where they are found.  
+    NOTE: Extract in English.  
     4. Return the modified filed application details in the following JSON format:  
     {{  
         "modified_filed_application_details": [  
@@ -604,24 +599,23 @@ def extract_and_modify_filed_application(filed_application_details, pending_clai
         ]  
     }}  
     """  
-      
+  
     messages = [  
         {  
             "role": "system",  
-            "content": content,
+            "content": content,  
         },  
         {  
             "role": "user",  
             "content": prompt,  
         },  
     ]  
-      
-    # Call OpenAI API for extracting and modifying filed application details  
+  
     try:  
         response = client.chat.completions.create(  
             model="GPT-4-Omni", messages=messages, temperature=0.2  
         )  
-          
+  
         # Extract the response content  
         content = response.choices[0].message.content.strip()  
   
@@ -640,20 +634,13 @@ def extract_and_modify_filed_application(filed_application_details, pending_clai
         # Print raw response for debugging  
         print(f"Raw response: {content}")  
   
-        # Validate JSON structure  
+        # Parse the JSON to ensure it's valid  
         if json_string:  
             try:  
-                # Parse the JSON to ensure it's valid  
                 parsed_json = json.loads(json_string)  
-                # Validate with Pydantic model  
-                details = FoundationalClaimDetails(**parsed_json)  
-                return details.dict()  
+                return parsed_json  # Directly return the parsed JSON  
             except json.JSONDecodeError as e:  
                 print(f"JSON decoding error: {e}")  
-                print(f"Raw response: {json_string}")  
-                return None  
-            except ValidationError as e:  
-                print(f"Validation error: {e.json()}")  
                 print(f"Raw response: {json_string}")  
                 return None  
         else:  
@@ -661,7 +648,7 @@ def extract_and_modify_filed_application(filed_application_details, pending_clai
             return None  
     except Exception as e:  
         print(f"Error extracting details from filed application: {e}")  
-        return None 
+        return None  
   
  
 # Function to analyze the filed application based on the foundational claim, figure analysis, and application details  
