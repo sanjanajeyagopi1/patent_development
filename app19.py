@@ -82,7 +82,7 @@ class FoundationalClaimDetails(BaseModel):
 def process_text(text):
  logging.info("Started processing text.")   
  try:
-    """Process the extracted text by tokenizing, removing stop words, punctuation, extra whitespace, and lemmatizing."""  
+    #process the extracted text by tokenizing, removing stop words, punctuation, extra whitespace, and lemmatizing
     stop_words = set(stopwords.words('english'))  
     lemmatizer = WordNetLemmatizer()  
       
@@ -106,7 +106,7 @@ def process_text(text):
 def extract_text_from_docx(docx_path):  
     logging.info(f"Extracting text from DOCX: {docx_path}")  
     try:  
-        """Extract text from a DOCX file."""  
+        #Extract text from a DOCX file 
         doc = docx.Document(docx_path)  
         full_text = []  
         for para in doc.paragraphs:  
